@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Generate TLV_TypeDefs.h and TLV_TypeDefs.py from TLV_TypeDefs.json
-This script reads the JSON file and generates both C++ header and Python module.
+Generate shared TLV type definitions from TLV_TypeDefs.json.
+
+Outputs:
+- firmware/arduino/src/messages/TLV_TypeDefs.h
+- nuevo_ui/backend/nuevo_bridge/TLV_TypeDefs.py
 """
 
 import json
@@ -11,14 +14,13 @@ from pathlib import Path
 def generate_c_header(json_data, output_path):
     """Generate C++ header file from JSON data"""
     types = json_data.get('types', {})
-    bitmasks = json_data.get('bitmasks', {})
-    
+
     header_content = """#pragma once
 
 #include <stdint.h>
 
 // Define TLV type constants here so both server and client can use them:
-// A valid TLV type is a non-negative integer.
+// TLV type identifiers are 8-bit values on the wire.
 // This file is auto-generated from TLV_TypeDefs.json - DO NOT EDIT MANUALLY
 
 // ============================================================================
@@ -31,7 +33,7 @@ def generate_c_header(json_data, output_path):
     sorted_types = sorted(types.items(), key=lambda x: x[1])
     
     for name, value in sorted_types:
-        header_content += f"constexpr uint32_t {name} = {value}U;\n"
+        header_content += f"constexpr uint8_t {name} = {value}U;\n"
     
     header_content += "\n"
     
@@ -44,8 +46,7 @@ def generate_c_header(json_data, output_path):
 def generate_python_module(json_data, output_path):
     """Generate Python module from JSON data"""
     types = json_data.get('types', {})
-    bitmasks = json_data.get('bitmasks', {})
-    
+
     python_content = """\"\"\"
 TLV Type Definitions - Auto-generated from TLV_TypeDefs.json
 This file is auto-generated - DO NOT EDIT MANUALLY
@@ -85,10 +86,7 @@ def main():
     script_dir = Path(__file__).parent
     json_file = script_dir / "TLV_TypeDefs.json"
     header_file = script_dir / ".." / "firmware" / "arduino" / "src" / "messages" / "TLV_TypeDefs.h"
-    python_files = [
-        script_dir / ".." / "ros2_ws" / "src" / "TLV_TypeDefs.py",
-        script_dir / ".." / "nuevo_ui" / "backend" / "nuevo_bridge" / "TLV_TypeDefs.py",
-    ]
+    python_files = [script_dir / ".." / "nuevo_ui" / "backend" / "nuevo_bridge" / "TLV_TypeDefs.py"]
 
     # Read JSON file
     if not json_file.exists():
@@ -110,4 +108,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

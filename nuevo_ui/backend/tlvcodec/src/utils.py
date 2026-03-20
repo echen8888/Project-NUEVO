@@ -1,31 +1,50 @@
 import ctypes
-import struct
-from enum import Enum
+
+__all__ = [
+    "FRAME_HEADER_MAGIC_NUM",
+    "FRAME_HEADER_SIZE",
+    "TLV_HEADER_SIZE",
+    "TLV_FLAG_CRC16",
+    "CRC16_BYTES2IGNORE",
+    "FrameHeader",
+    "TlvHeader",
+    "crc16_ccitt",
+]
+
+FRAME_HEADER_MAGIC_NUM = bytes((0xAA, 0x55, 0x5A, 0xA5))
+FRAME_HEADER_SIZE = 12
+TLV_HEADER_SIZE = 2
+TLV_FLAG_CRC16 = 0x01
+CRC16_BYTES2IGNORE = 8
 
 
-__all__ = ['NumTotalBytes', 'FrameHeader', 'TlvHeader', 'NUM_PADDING_BYTES', 'FRAME_HEADER_MAGIC_NUM']
-FRAME_HEADER_MAGIC_NUM = b'\x02\x01\x04\x03\x06\x05\x08\x07'
-
-MSG_BUFFER_SEGMENT_LEN = 8
-
-def NUM_PADDING_BYTES(numTotalBytes):
-    return MSG_BUFFER_SEGMENT_LEN - (numTotalBytes & (MSG_BUFFER_SEGMENT_LEN - 1))
-
-class NumTotalBytes(ctypes.Union):
-    _fields_ = [("value", ctypes.c_uint32),
-                ("payload", ctypes.c_byte * 4)]
-                
-                
 class FrameHeader(ctypes.Structure):
-    _fields_ = [("magicNum", ctypes.ARRAY(ctypes.c_byte, 8)),
-                ("numTotalBytes", NumTotalBytes),
-                ("checksum", ctypes.c_uint32),
-                ("deviceId", ctypes.c_uint32),
-                ("frameNum", ctypes.c_uint32),
-                ("numTlvs", ctypes.c_uint32)]
+    _pack_ = 1
+    _fields_ = [
+        ("magicNum", ctypes.c_uint8 * 4),
+        ("numTotalBytes", ctypes.c_uint16),
+        ("checksum", ctypes.c_uint16),
+        ("deviceId", ctypes.c_uint8),
+        ("frameNum", ctypes.c_uint8),
+        ("numTlvs", ctypes.c_uint8),
+        ("flags", ctypes.c_uint8),
+    ]
 
-# define the TLV header structure
+
 class TlvHeader(ctypes.Structure):
-    _fields_ = [("tlvType", ctypes.c_uint32),
-                ("tlvLen", ctypes.c_uint32)]
+    _pack_ = 1
+    _fields_ = [
+        ("tlvType", ctypes.c_uint8),
+        ("tlvLen", ctypes.c_uint8),
+    ]
 
+
+def crc16_ccitt(data: bytes, crc: int = 0xFFFF) -> int:
+    for byte in data:
+        crc ^= (byte << 8)
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = ((crc << 1) ^ 0x1021) & 0xFFFF
+            else:
+                crc = (crc << 1) & 0xFFFF
+    return crc

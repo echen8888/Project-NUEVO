@@ -1,6 +1,6 @@
 /**
  * @file MessageCenter.cpp
- * @brief Implementation of central message routing (TLV protocol v2.0)
+ * @brief Implementation of central message routing (compact TLV protocol)
  *
  * Telemetry batching:
  *   sendTelemetry() calls beginFrame() once, appends each due TLV with
@@ -24,8 +24,8 @@
 #include "../drivers/StepperMotor.h"
 #include "../drivers/ServoController.h"
 #include "StepperManager.h"
-#include <string.h>
 #include <math.h>
+#include <string.h>
 
 // External references to motor arrays (defined in arduino.ino)
 extern DCMotor dcMotors[NUM_DC_MOTORS];
@@ -193,7 +193,7 @@ void MessageCenter::init()
     initialized_ = true;
 
 #ifdef DEBUG_TLV_PACKETS
-    DEBUG_LOG.println(F("[MessageCenter] Initialized (v2.0, batched TX)"));
+    DEBUG_LOG.println(F("[MessageCenter] Initialized (compact TLV, batched TX)"));
 #endif
 }
 
@@ -206,21 +206,21 @@ void MessageCenter::beginFrame()
     resetDescriptor(&encodeDesc_);
 }
 
-bool MessageCenter::appendTlv(uint32_t tlvType, uint16_t tlvLen, const void *dataAddr)
+bool MessageCenter::appendTlv(uint16_t tlvType, uint16_t tlvLen, const void *dataAddr)
 {
-    const size_t required = sizeof(struct TlvHeader) + tlvLen + (MSG_BUFFER_SEGMENT_LEN - 1U);
-    if (encodeDesc_.bufferIndex + required > encodeDesc_.bufferSize) {
+    const size_t required = sizeof(struct TlvHeader) + tlvLen;
+    if (tlvType > 0xFFU || tlvLen > 0xFFU || encodeDesc_.bufferIndex + required > encodeDesc_.bufferSize) {
         return false;
     }
 
-    addTlvPacket(&encodeDesc_, tlvType, tlvLen, dataAddr);
+    addTlvPacket(&encodeDesc_, (uint8_t)tlvType, (uint8_t)tlvLen, dataAddr);
     return true;
 }
 
-bool MessageCenter::appendTelemetryTlv(uint32_t tlvType, uint16_t tlvLen, const void *dataAddr)
+bool MessageCenter::appendTelemetryTlv(uint16_t tlvType, uint16_t tlvLen, const void *dataAddr)
 {
-    const size_t required = sizeof(struct TlvHeader) + tlvLen + (MSG_BUFFER_SEGMENT_LEN - 1U);
-    if (encodeDesc_.bufferIndex + required > encodeDesc_.bufferSize) {
+    const size_t required = sizeof(struct TlvHeader) + tlvLen;
+    if (tlvType > 0xFFU || tlvLen > 0xFFU || encodeDesc_.bufferIndex + required > encodeDesc_.bufferSize) {
         return false;
     }
 
@@ -232,7 +232,7 @@ bool MessageCenter::appendTelemetryTlv(uint32_t tlvType, uint16_t tlvLen, const 
         return false;
     }
 
-    addTlvPacket(&encodeDesc_, tlvType, tlvLen, dataAddr);
+    addTlvPacket(&encodeDesc_, (uint8_t)tlvType, (uint8_t)tlvLen, dataAddr);
     return true;
 }
 
@@ -702,9 +702,9 @@ void MessageCenter::decodeCallback(enum DecodeErrorCode *error,
     }
     uint32_t rxTlvsSum = (uint32_t)rxTlvsWindow_ + frameHeader->numTlvs;
     rxTlvsWindow_ = (rxTlvsSum > 0xFFFFUL) ? 0xFFFFU : (uint16_t)rxTlvsSum;
-    for (uint32_t i = 0; i < frameHeader->numTlvs; i++)
+    for (uint8_t i = 0; i < frameHeader->numTlvs; i++)
     {
-        uint32_t length = tlvHeaders[i].tlvLen;
+        uint8_t length = tlvHeaders[i].tlvLen;
         if (length > MAX_TLV_PAYLOAD_SIZE)
         {
             uartRxErrors_++;
@@ -731,7 +731,7 @@ void MessageCenter::decodeCallback(enum DecodeErrorCode *error,
 // MESSAGE ROUTING
 // ============================================================================
 
-void MessageCenter::routeMessage(uint32_t type, const uint8_t *payload, uint32_t length)
+void MessageCenter::routeMessage(uint8_t type, const uint8_t *payload, uint8_t length)
 {
     // Any received TLV resets the liveness timer
     bool wasHeartbeatValid = heartbeatValid_;

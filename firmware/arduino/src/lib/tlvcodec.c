@@ -1,134 +1,165 @@
 /*
  * Developed by Toby Chen, con mucho amor <3
  * Author Email: pc.toby.chen@gmail.com
- * Date: May 1, 2025
+ * Update Date: May 20, 2026
  * License: MIT
  */
 
-#include <stdio.h>
-#include <stdlib.h>
 #include "tlvcodec.h"
 
-uint8_t FRAME_HEADER_MAGIC_NUM[8] = {0x02, 0x01, 0x04, 0x03, 0x06, 0x05, 0x08, 0x07};
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-// encoder function definitions
-void initEncodeDescriptor(struct TlvEncodeDescriptor *descriptor, size_t bufferSize, uint32_t deviceId, bool crc)
+uint8_t FRAME_HEADER_MAGIC_NUM[FRAME_HEADER_MAGIC_NUM_LEN] = {0xAA, 0x55, 0x5A, 0xA5};
+
+static void writeLe16(uint8_t *dst, uint16_t value)
+{
+    dst[0] = (uint8_t)(value & 0xFFU);
+    dst[1] = (uint8_t)((value >> 8) & 0xFFU);
+}
+
+static uint16_t readLe16(const uint8_t *src)
+{
+    return (uint16_t)((uint16_t)src[0] | ((uint16_t)src[1] << 8));
+}
+
+static void serializeFrameHeader(uint8_t *dst, const struct FrameHeader *header)
+{
+    memcpy(dst, header->magicNum, FRAME_HEADER_MAGIC_NUM_LEN);
+    writeLe16(dst + 4U, header->numTotalBytes);
+    writeLe16(dst + 6U, header->checksum);
+    dst[8] = header->deviceId;
+    dst[9] = header->frameNum;
+    dst[10] = header->numTlvs;
+    dst[11] = header->flags;
+}
+
+static void deserializeFrameHeader(struct FrameHeader *header, const uint8_t *src)
+{
+    memcpy(header->magicNum, src, FRAME_HEADER_MAGIC_NUM_LEN);
+    header->numTotalBytes = readLe16(src + 4U);
+    header->checksum = readLe16(src + 6U);
+    header->deviceId = src[8];
+    header->frameNum = src[9];
+    header->numTlvs = src[10];
+    header->flags = src[11];
+}
+
+static void reportDecodeError(struct TlvDecodeDescriptor *descriptor,
+                              enum DecodeErrorCode error)
+{
+    descriptor->errorCode = error;
+    if (descriptor->callback != NULL) {
+        descriptor->callback(&descriptor->errorCode, &descriptor->frameHeader, NULL, NULL);
+    }
+}
+
+void initEncodeDescriptor(struct TlvEncodeDescriptor *descriptor,
+                          size_t bufferSize,
+                          uint8_t deviceId,
+                          bool crc)
 {
     descriptor->buffer = (uint8_t *)malloc(bufferSize);
-    if (descriptor->buffer == NULL)
-    {
+    if (descriptor->buffer == NULL) {
         fprintf(stderr, "Failed to allocate memory for buffer\n");
         exit(EXIT_FAILURE);
     }
-    descriptor->bufferIndex = sizeof(struct FrameHeader);
-    descriptor->bufferSize = bufferSize;
 
-    // init magic num
-    for (int i = 0; i < sizeof(FRAME_HEADER_MAGIC_NUM); i++)
-    {
-        descriptor->frameHeader.magicNum[i] = FRAME_HEADER_MAGIC_NUM[i];
-    }
-    descriptor->frameHeader.deviceId = deviceId;
+    descriptor->bufferSize = bufferSize;
+    descriptor->bufferIndex = sizeof(struct FrameHeader);
     descriptor->crc = crc;
-    descriptor->frameHeader.numTotalBytes.value = 0;
-    descriptor->frameHeader.frameNum = 0;
-    descriptor->frameHeader.numTlvs = 0;
+    memset(&descriptor->frameHeader, 0, sizeof(descriptor->frameHeader));
+    memcpy(descriptor->frameHeader.magicNum, FRAME_HEADER_MAGIC_NUM, FRAME_HEADER_MAGIC_NUM_LEN);
+    descriptor->frameHeader.deviceId = deviceId;
+    descriptor->frameHeader.flags = crc ? TLV_FLAG_CRC16 : 0U;
 }
 
 void releaseEncodeDescriptor(struct TlvEncodeDescriptor *descriptor)
 {
-    if (descriptor->buffer != NULL)
-    {
+    if (descriptor->buffer != NULL) {
         free(descriptor->buffer);
         descriptor->buffer = NULL;
     }
 }
 
-void addTlvPacket(struct TlvEncodeDescriptor *descriptor, uint32_t tlvType, uint32_t tlvLen, const void *dataAddr)
+void addTlvPacket(struct TlvEncodeDescriptor *descriptor,
+                  uint8_t tlvType,
+                  uint8_t tlvLen,
+                  const void *dataAddr)
 {
-    if (descriptor->bufferIndex + sizeof(struct TlvHeader) + tlvLen > descriptor->bufferSize)
-    {
+    if (descriptor->bufferIndex + sizeof(struct TlvHeader) + (size_t)tlvLen > descriptor->bufferSize) {
         fprintf(stderr, "Buffer overflow\n");
         exit(EXIT_FAILURE);
     }
+
     descriptor->tlvHeader.tlvType = tlvType;
     descriptor->tlvHeader.tlvLen = tlvLen;
-    memcpy(descriptor->buffer + descriptor->bufferIndex, &descriptor->tlvHeader, sizeof(struct TlvHeader));
-    descriptor->bufferIndex += sizeof(struct TlvHeader);
-    memcpy(descriptor->buffer + descriptor->bufferIndex, dataAddr, tlvLen);
-    descriptor->bufferIndex += tlvLen;
-    descriptor->frameHeader.numTlvs++;
+    descriptor->buffer[descriptor->bufferIndex++] = descriptor->tlvHeader.tlvType;
+    descriptor->buffer[descriptor->bufferIndex++] = descriptor->tlvHeader.tlvLen;
+
+    if (tlvLen > 0U && dataAddr != NULL) {
+        memcpy(descriptor->buffer + descriptor->bufferIndex, dataAddr, tlvLen);
+        descriptor->bufferIndex += tlvLen;
+    }
+
+    descriptor->frameHeader.numTlvs = (uint8_t)(descriptor->frameHeader.numTlvs + 1U);
 }
 
 int wrapupBuffer(struct TlvEncodeDescriptor *descriptor)
 {
-    // add padding bytes to the size of MSG_BUFFER_SEGMENT_LEN
-    size_t padding = descriptor->bufferIndex % MSG_BUFFER_SEGMENT_LEN;
-    if (padding != 0)
-    {
-        padding = MSG_BUFFER_SEGMENT_LEN - padding;
-        memset(descriptor->buffer + descriptor->bufferIndex, 0, padding);
-        descriptor->bufferIndex += padding;
+    descriptor->frameHeader.numTotalBytes = (uint16_t)descriptor->bufferIndex;
+    descriptor->frameHeader.checksum = 0U;
+    descriptor->frameHeader.flags = descriptor->crc ? TLV_FLAG_CRC16 : 0U;
+
+    serializeFrameHeader(descriptor->buffer, &descriptor->frameHeader);
+
+    if (descriptor->crc) {
+        descriptor->frameHeader.checksum =
+            CRC16(descriptor->buffer + CRC16_BYTES2IGNORE,
+                  descriptor->bufferIndex - CRC16_BYTES2IGNORE);
+        writeLe16(descriptor->buffer + 6U, descriptor->frameHeader.checksum);
     }
 
-    // Update total bytes
-    descriptor->frameHeader.numTotalBytes.value = descriptor->bufferIndex;
-
-    // copy the frame header to the beginning of the buffer
-    memcpy(descriptor->buffer, &descriptor->frameHeader, sizeof(struct FrameHeader));
-
-    // Calculate crc here if enabled
-    if (descriptor->crc)
-    {
-        // Calculate CRC32 and store in descriptor->frameHeader.checksum
-        descriptor->frameHeader.checksum = CRC32(descriptor->buffer + CRC32_BYTES2IGNORE, descriptor->bufferIndex - CRC32_BYTES2IGNORE);
-    }
-    else
-    {
-        descriptor->frameHeader.checksum = 0;
-    }
-
-    // copy crc result to the buffer
-    memcpy(descriptor->buffer + 12, &descriptor->frameHeader.checksum, sizeof(uint32_t));
-
-    // return the total bytes of the frame
-    return (int)(descriptor->frameHeader.numTotalBytes.value); // return the total bytes of the frame
+    return (int)descriptor->frameHeader.numTotalBytes;
 }
 
 void resetDescriptor(struct TlvEncodeDescriptor *descriptor)
 {
     descriptor->bufferIndex = sizeof(struct FrameHeader);
-    descriptor->frameHeader.frameNum++;
-    descriptor->frameHeader.numTlvs = 0;
+    descriptor->frameHeader.frameNum = (uint8_t)(descriptor->frameHeader.frameNum + 1U);
+    descriptor->frameHeader.numTlvs = 0U;
+    descriptor->frameHeader.checksum = 0U;
+    descriptor->frameHeader.flags = descriptor->crc ? TLV_FLAG_CRC16 : 0U;
 }
 
-// decoder function definitions
-void initDecodeDescriptor(struct TlvDecodeDescriptor *descriptor, size_t bufferSize, bool crc, void (*callback)(enum DecodeErrorCode *error, const struct FrameHeader *frameHeader, struct TlvHeader *tlvHeaders, uint8_t **tlvData))
+void initDecodeDescriptor(struct TlvDecodeDescriptor *descriptor,
+                          size_t bufferSize,
+                          bool crc,
+                          void (*callback)(enum DecodeErrorCode *error,
+                                           const struct FrameHeader *frameHeader,
+                                           struct TlvHeader *tlvHeaders,
+                                           uint8_t **tlvData))
 {
     size_t tlvSlots = TLVCODEC_TLV_SLOTS_FOR_FRAME_BYTES(bufferSize);
 
-    // allocate the buffer
     descriptor->buffer = (uint8_t *)malloc(bufferSize);
-    if (descriptor->buffer == NULL)
-    {
+    if (descriptor->buffer == NULL) {
         fprintf(stderr, "Failed to allocate memory for buffer\n");
         exit(EXIT_FAILURE);
     }
-    // allocate the tlv header and data
+
     descriptor->tlvHeaders = NULL;
     descriptor->tlvData = NULL;
-    if (tlvSlots > 0)
-    {
+    if (tlvSlots > 0U) {
         descriptor->tlvHeaders = (struct TlvHeader *)malloc(sizeof(struct TlvHeader) * tlvSlots);
-        if (descriptor->tlvHeaders == NULL)
-        {
+        if (descriptor->tlvHeaders == NULL) {
             fprintf(stderr, "Failed to allocate memory for tlv headers\n");
             free(descriptor->buffer);
             exit(EXIT_FAILURE);
         }
         descriptor->tlvData = (uint8_t **)malloc(sizeof(uint8_t *) * tlvSlots);
-        if (descriptor->tlvData == NULL)
-        {
+        if (descriptor->tlvData == NULL) {
             fprintf(stderr, "Failed to allocate memory for tlv data\n");
             free(descriptor->buffer);
             free(descriptor->tlvHeaders);
@@ -136,30 +167,27 @@ void initDecodeDescriptor(struct TlvDecodeDescriptor *descriptor, size_t bufferS
         }
     }
 
-    // initialize the descriptor
     descriptor->bufferSize = bufferSize;
-    descriptor->bufferIndex = 0;
+    descriptor->bufferIndex = 0U;
     descriptor->crc = crc;
-    descriptor->ofst = 0;
     descriptor->decodeState = Init;
     descriptor->errorCode = NoError;
+    descriptor->ofst = 0U;
+    memset(&descriptor->frameHeader, 0, sizeof(descriptor->frameHeader));
     descriptor->callback = callback;
 }
 
 void releaseDecodeDescriptor(struct TlvDecodeDescriptor *descriptor)
 {
-    if (descriptor->buffer != NULL)
-    {
+    if (descriptor->buffer != NULL) {
         free(descriptor->buffer);
         descriptor->buffer = NULL;
     }
-    if (descriptor->tlvHeaders != NULL)
-    {
+    if (descriptor->tlvHeaders != NULL) {
         free(descriptor->tlvHeaders);
         descriptor->tlvHeaders = NULL;
     }
-    if (descriptor->tlvData != NULL)
-    {
+    if (descriptor->tlvData != NULL) {
         free(descriptor->tlvData);
         descriptor->tlvData = NULL;
     }
@@ -167,92 +195,76 @@ void releaseDecodeDescriptor(struct TlvDecodeDescriptor *descriptor)
 
 void decode(struct TlvDecodeDescriptor *descriptor, const uint8_t *data, size_t dataLen)
 {
-    // iterate the data to decode and send them to decodePacket() one by one
-    for (size_t i = 0; i < dataLen; i++)
-    {
+    for (size_t i = 0; i < dataLen; i++) {
         decodePacket(descriptor, &data[i]);
     }
 }
 
 void decodePacket(struct TlvDecodeDescriptor *descriptor, const uint8_t *data)
 {
-    switch (descriptor->decodeState)
-    {
+    switch (descriptor->decodeState) {
     case Init:
-        // check if the byte is the first byte of the magic number
-        if (*data == FRAME_HEADER_MAGIC_NUM[0])
-        {
-            descriptor->bufferIndex = 0;
+        if (*data == FRAME_HEADER_MAGIC_NUM[0]) {
+            descriptor->bufferIndex = 0U;
             descriptor->buffer[descriptor->bufferIndex++] = *data;
-            descriptor->ofst = 1;
+            descriptor->ofst = 1U;
+            descriptor->frameHeader.numTotalBytes = 0U;
             descriptor->decodeState = MagicNum;
         }
         break;
+
     case MagicNum:
-        // waiting for the full magic number sets
-        if (*data == FRAME_HEADER_MAGIC_NUM[descriptor->ofst++])
-        {
+        if (*data == FRAME_HEADER_MAGIC_NUM[descriptor->ofst]) {
             descriptor->buffer[descriptor->bufferIndex++] = *data;
-            if (descriptor->ofst >= sizeof(FRAME_HEADER_MAGIC_NUM))
-            {
-                descriptor->ofst = 0;
+            descriptor->ofst++;
+            if (descriptor->ofst >= FRAME_HEADER_MAGIC_NUM_LEN) {
+                descriptor->ofst = 0U;
+                descriptor->frameHeader.numTotalBytes = 0U;
                 descriptor->decodeState = TotalPacketLen;
             }
-        }
-        else
-        {
-            // Mismatch: reset to Init, but re-examine the current byte.
-            // Without this, a valid frame start byte arriving immediately after
-            // a corrupt magic sequence is silently discarded, forcing an extra
-            // round-trip through Init before re-syncing.
+        } else {
             resetDecodeDescriptor(descriptor);
-            if (*data == FRAME_HEADER_MAGIC_NUM[0])
-            {
+            if (*data == FRAME_HEADER_MAGIC_NUM[0]) {
                 descriptor->buffer[descriptor->bufferIndex++] = *data;
-                descriptor->ofst = 1;
+                descriptor->ofst = 1U;
                 descriptor->decodeState = MagicNum;
             }
         }
         break;
-    case TotalPacketLen:
-        // Waiting for the total packet length
-        descriptor->frameHeader.numTotalBytes.payload[descriptor->ofst++] = *data; // extracting the total packet length for later use
-        descriptor->buffer[descriptor->bufferIndex++] = *data;                     // the data should still be added to the buffer
 
-        if (descriptor->ofst >= sizeof(descriptor->frameHeader.numTotalBytes)) // 4 bytes
-        {
-            // check if the total packet length is valid
-            if (descriptor->frameHeader.numTotalBytes.value > descriptor->bufferSize || descriptor->frameHeader.numTotalBytes.value < descriptor->bufferIndex)
-            {
-                // send result with error
-                descriptor->errorCode = TotalPacketLenError;
-                if (descriptor->callback != NULL)
-                {
-                    descriptor->callback(&descriptor->errorCode, &descriptor->frameHeader, NULL, NULL);
-                }
-                resetDecodeDescriptor(descriptor); // also changes the state to init
-            }
-            else if (descriptor->frameHeader.numTotalBytes.value == descriptor->bufferIndex)
-            {
-                // this is a TLV packet without payload
-                parseFrame(descriptor);
-                resetDecodeDescriptor(descriptor); // also changes the state to init
-            }
-            else
-            {
+    case TotalPacketLen:
+        descriptor->buffer[descriptor->bufferIndex++] = *data;
+        descriptor->frameHeader.numTotalBytes |= (uint16_t)((uint16_t)(*data) << (descriptor->ofst * 8U));
+        descriptor->ofst++;
+
+        if (descriptor->ofst >= 2U) {
+            descriptor->ofst = 0U;
+            if (descriptor->frameHeader.numTotalBytes > descriptor->bufferSize ||
+                descriptor->frameHeader.numTotalBytes < sizeof(struct FrameHeader) ||
+                descriptor->frameHeader.numTotalBytes < descriptor->bufferIndex) {
+                reportDecodeError(descriptor, TotalPacketLenError);
+                resetDecodeDescriptor(descriptor);
+            } else {
                 descriptor->decodeState = WaitFullFrame;
             }
         }
         break;
+
     case WaitFullFrame:
+        if (descriptor->bufferIndex >= descriptor->bufferSize) {
+            reportDecodeError(descriptor, BufferOutOfIndex);
+            resetDecodeDescriptor(descriptor);
+            break;
+        }
+
         descriptor->buffer[descriptor->bufferIndex++] = *data;
-        if (descriptor->bufferIndex >= descriptor->frameHeader.numTotalBytes.value)
-        {
-            descriptor->ofst = 0;
+        if (descriptor->bufferIndex >= descriptor->frameHeader.numTotalBytes) {
+            descriptor->ofst = 0U;
             parseFrame(descriptor);
-            resetDecodeDescriptor(descriptor); // also changes the state to init
+            resetDecodeDescriptor(descriptor);
         }
         break;
+
     default:
         resetDecodeDescriptor(descriptor);
         break;
@@ -262,92 +274,103 @@ void decodePacket(struct TlvDecodeDescriptor *descriptor, const uint8_t *data)
 void parseFrame(struct TlvDecodeDescriptor *descriptor)
 {
     size_t packetTlvSlots;
+    bool frameHasCrc;
 
-    descriptor->frameHeader = *(struct FrameHeader *)(descriptor->buffer); // parse all info for a single frame header
-    descriptor->ofst = sizeof(struct FrameHeader);                         // offset used for the whole frame
-
-    packetTlvSlots = TLVCODEC_TLV_SLOTS_FOR_FRAME_BYTES(descriptor->frameHeader.numTotalBytes.value);
-    if (descriptor->frameHeader.numTlvs > packetTlvSlots)
-    {
-        descriptor->errorCode = TlvError;
-        if (descriptor->callback != NULL)
-        {
-            descriptor->callback(&descriptor->errorCode, &descriptor->frameHeader, NULL, NULL);
-        }
+    if (descriptor->bufferIndex < sizeof(struct FrameHeader)) {
+        reportDecodeError(descriptor, UnpackFrameHeaderError);
         return;
     }
 
-    // Check CRC32 error if enabled
-    if (descriptor->crc)
-    {
-        uint32_t validCrc32 = CRC32(descriptor->buffer + CRC32_BYTES2IGNORE, descriptor->frameHeader.numTotalBytes.value - CRC32_BYTES2IGNORE);
-        if (descriptor->frameHeader.checksum != validCrc32)
-        {
-            descriptor->errorCode = CrcError;
-            if (descriptor->callback != NULL)
-            {
-                descriptor->callback(&descriptor->errorCode, &descriptor->frameHeader, NULL, NULL);
-            }
+    deserializeFrameHeader(&descriptor->frameHeader, descriptor->buffer);
+    descriptor->ofst = sizeof(struct FrameHeader);
+
+    if (memcmp(descriptor->frameHeader.magicNum, FRAME_HEADER_MAGIC_NUM, FRAME_HEADER_MAGIC_NUM_LEN) != 0) {
+        reportDecodeError(descriptor, UnpackFrameHeaderError);
+        return;
+    }
+
+    if (descriptor->frameHeader.numTotalBytes != descriptor->bufferIndex) {
+        reportDecodeError(descriptor, TotalPacketLenError);
+        return;
+    }
+
+    packetTlvSlots = TLVCODEC_TLV_SLOTS_FOR_FRAME_BYTES(descriptor->frameHeader.numTotalBytes);
+    if (descriptor->frameHeader.numTlvs > packetTlvSlots) {
+        reportDecodeError(descriptor, TlvError);
+        return;
+    }
+
+    frameHasCrc = (descriptor->frameHeader.flags & TLV_FLAG_CRC16) != 0U;
+    if (descriptor->crc != frameHasCrc) {
+        reportDecodeError(descriptor, CrcError);
+        return;
+    }
+
+    if (frameHasCrc) {
+        uint16_t validCrc =
+            CRC16(descriptor->buffer + CRC16_BYTES2IGNORE,
+                  descriptor->frameHeader.numTotalBytes - CRC16_BYTES2IGNORE);
+        if (descriptor->frameHeader.checksum != validCrc) {
+            reportDecodeError(descriptor, CrcError);
             return;
         }
     }
 
-    // parse TLVs and return the results all together
-    for (size_t i = 0; i < descriptor->frameHeader.numTlvs; ++i)
-    {
-        // TL header (Type, Length)
-        descriptor->tlvHeaders[i] = *(struct TlvHeader *)(descriptor->buffer + descriptor->ofst);
-        descriptor->ofst += sizeof(struct TlvHeader);
-
-        // check if the tlv length is valid
-        if (descriptor->tlvHeaders[i].tlvLen > descriptor->frameHeader.numTotalBytes.value - descriptor->ofst)
-        {
-            descriptor->errorCode = TlvLenError;
-            if (descriptor->callback != NULL)
-            {
-                descriptor->callback(&descriptor->errorCode, &descriptor->frameHeader, NULL, NULL);
-            }
+    for (uint8_t i = 0; i < descriptor->frameHeader.numTlvs; ++i) {
+        if (descriptor->ofst + sizeof(struct TlvHeader) > descriptor->frameHeader.numTotalBytes) {
+            reportDecodeError(descriptor, TlvError);
             return;
-        }else{
-            // valid tlv length; add data pointer for output
-            descriptor->tlvData[i] = descriptor->buffer + descriptor->ofst;
-            descriptor->ofst += descriptor->tlvHeaders[i].tlvLen;
         }
+
+        descriptor->tlvHeaders[i].tlvType = descriptor->buffer[descriptor->ofst++];
+        descriptor->tlvHeaders[i].tlvLen = descriptor->buffer[descriptor->ofst++];
+
+        if (descriptor->ofst + descriptor->tlvHeaders[i].tlvLen > descriptor->frameHeader.numTotalBytes) {
+            reportDecodeError(descriptor, TlvLenError);
+            return;
+        }
+
+        descriptor->tlvData[i] = descriptor->buffer + descriptor->ofst;
+        descriptor->ofst += descriptor->tlvHeaders[i].tlvLen;
     }
 
-    // all the tlv headers and data are valid; send result
-    if (descriptor->callback != NULL)
-    {
-        descriptor->callback(&descriptor->errorCode, &descriptor->frameHeader, descriptor->tlvHeaders, descriptor->tlvData);
+    if (descriptor->ofst != descriptor->frameHeader.numTotalBytes) {
+        reportDecodeError(descriptor, TlvLenError);
+        return;
     }
 
-    return;
+    descriptor->errorCode = NoError;
+    if (descriptor->callback != NULL) {
+        descriptor->callback(&descriptor->errorCode,
+                             &descriptor->frameHeader,
+                             descriptor->tlvHeaders,
+                             descriptor->tlvData);
+    }
 }
 
 void resetDecodeDescriptor(struct TlvDecodeDescriptor *descriptor)
 {
+    descriptor->bufferIndex = 0U;
     descriptor->decodeState = Init;
-    descriptor->bufferIndex = 0;
-    descriptor->ofst = 0;
     descriptor->errorCode = NoError;
+    descriptor->ofst = 0U;
+    memset(&descriptor->frameHeader, 0, sizeof(descriptor->frameHeader));
 }
 
-// CRC32 function
-uint32_t CRC32(const uint8_t *data, size_t length)
+uint16_t CRC16(const uint8_t *data, size_t length)
 {
-    uint32_t crc = 0xFFFFFFFF; // initial value
+    uint16_t crc = 0xFFFFU;
 
-    for (size_t i = 0; i < length; i++)
-    {
-        crc ^= data[i]; // reflect input byte (handled naturally by the XOR)
-        for (int j = 0; j < 8; j++)
-        {
-            if (crc & 1)
-                crc = (crc >> 1) ^ 0xEDB88320; // reversed polynomial of 0x04C11DB7
-            else
-                crc = crc >> 1;
+    for (size_t i = 0; i < length; ++i) {
+        crc ^= (uint16_t)((uint16_t)data[i] << 8);
+        for (uint8_t bit = 0; bit < 8U; ++bit) {
+            if ((crc & 0x8000U) != 0U) {
+                crc = (uint16_t)((crc << 1) ^ 0x1021U);
+            } else {
+                crc <<= 1;
+            }
         }
     }
 
-    return crc ^ 0xFFFFFFFF; // final XOR
+    return crc;
 }

@@ -1,6 +1,6 @@
 # TLV Payload Specifications
 
-**Version:** 2.0
+**Version:** 3.0
 **Date:** 2026-02-19
 
 This document defines the packed binary payload for every TLV message type.
@@ -8,42 +8,45 @@ Type ID constants are defined in `TLV_TypeDefs.json` and auto-generated into:
 - `firmware/arduino/src/messages/TLV_TypeDefs.h` (C++)
 - `nuevo_ui/backend/nuevo_bridge/TLV_TypeDefs.py` (Python)
 
-Payload struct definitions belong in:
+Payload struct definitions are mirrored in:
 - `firmware/arduino/src/messages/TLV_Payloads.h` (C++)
-- `nuevo_ui/backend/nuevo_bridge/tlv_payloads.py` (Python `struct` format strings)
+- `nuevo_ui/backend/nuevo_bridge/payloads.py` (Python `ctypes`)
 
-See `COMMUNICATION_PROTOCOL.md` for the full system design including state
-machine, safety design, and streaming rates.
+See `docs/COMMUNICATION_PROTOCOL.md` for the full system design including state
+machine, safety design, and streaming rates. The code files above are the
+practical reference for field layout; this document defines the wire framing,
+message families, and payload conventions.
 
 ---
 
 ## Frame Structure
 
-Each UART transmission is a **frame** consisting of a 28-byte FrameHeader
+Each UART transmission is a **frame** consisting of a 12-byte `FrameHeader`
 followed by one or more TLV packets:
 
 ```
-FrameHeader (28 bytes):
-  uint8_t  magicNum[8]    — sync pattern for frame boundary detection
-  uint32_t numTotalBytes  — total byte count of this frame
-  uint32_t checksum       — CRC32 over bytes 16+ (deviceId onward + all TLVs)
-  uint32_t deviceId       — sender ID (defined in config.h)
-  uint32_t frameNum       — incrementing frame sequence number
-  uint32_t numTlvs        — number of TLV packets that follow
+FrameHeader (12 bytes):
+  uint8_t  magicNum[4]    — sync pattern for frame boundary detection
+  uint16_t numTotalBytes  — total byte count of this frame
+  uint16_t checksum       — CRC16-CCITT over bytes 8+ (deviceId onward + TLVs)
+  uint8_t  deviceId       — sender ID
+  uint8_t  frameNum       — incrementing frame sequence number
+  uint8_t  numTlvs        — number of TLV packets that follow
+  uint8_t  flags          — bit0 = CRC16 enabled
 
-Per TLV packet (8-byte header + payload):
-  uint32_t tlvType        — message type ID (from TLV_TypeDefs.json)
-  uint32_t tlvLen         — payload byte count
+Per TLV packet (2-byte header + payload):
+  uint8_t  tlvType        — message type ID (from TLV_TypeDefs.json)
+  uint8_t  tlvLen         — payload byte count (0–255)
   uint8_t  payload[tlvLen]
 ```
 
-The CRC32 covers the frame starting at byte 16 (skipping magicNum +
-numTotalBytes + checksum itself). Defined by `CRC32_BYTES2IGNORE = 16`
+The CRC16 covers the frame starting at byte 8 (skipping `magicNum`,
+`numTotalBytes`, and `checksum` itself). Defined by `CRC16_BYTES2IGNORE = 8`
 in `tlvcodec.h`.
 
-Frame overhead per message: **36 bytes** (28-byte header + 8-byte TLV header).
+Frame overhead per message: **14 bytes** (12-byte frame header + 2-byte TLV header).
 Multiple TLVs can share one FrameHeader (see bundling note in
-`COMMUNICATION_PROTOCOL.md` Section 8.2).
+`docs/COMMUNICATION_PROTOCOL.md` Section 8.2).
 
 ## Payload Conventions
 
@@ -54,11 +57,11 @@ Multiple TLVs can share one FrameHeader (see bundling note in
 - `float` is IEEE 754 single precision (4 bytes).
 - Direction: ↓ = RPi → Arduino, ↑ = Arduino → RPi.
 - **Payload size** is the byte count of the TLV payload struct only
-  (excludes FrameHeader and TlvHeader overhead).
+  (excludes `FrameHeader` and `TlvHeader` overhead).
 
 ---
 
-## System Messages (type 1–19)
+## System Messages (types 1–5)
 
 ---
 
@@ -200,7 +203,7 @@ Python format string: `<BB2xfffff`
 
 ---
 
-## DC Motor Messages (type 256–279)
+## DC Motor Messages (types 16–20)
 
 ---
 
@@ -315,7 +318,7 @@ Python format string (all 4 motors): `<` + `BBiiiihh6f` × 4
 
 ---
 
-## Stepper Motor Messages (type 512–539)
+## Stepper Motor Messages (types 32–36)
 
 ---
 
@@ -421,7 +424,7 @@ Python format string (all 4 steppers): `<` + `BBBxiiIII` × 4
 
 ---
 
-## Servo Messages (type 768–789)
+## Servo Messages (types 48–50)
 
 ---
 
@@ -493,7 +496,7 @@ Python format string: `<BBH16H`
 
 ---
 
-## Sensor Messages (type 1024–1059)
+## Sensor Messages (types 64–69)
 
 ---
 
@@ -676,7 +679,7 @@ Python format string: `<BHx9fB3x`
 
 ---
 
-## User I/O Messages (type 1280–1299)
+## User I/O Messages (types 80–82)
 
 ---
 

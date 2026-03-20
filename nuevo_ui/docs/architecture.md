@@ -96,7 +96,7 @@ Sizes are verified against firmware `STATIC_ASSERT_SIZE` macros:
 ### `tlvcodec/`
 Python TLV encoder/decoder matching the Arduino C implementation.
 Located at `backend/tlvcodec/`. Installed as a local package alongside `nuevo_bridge`.
-Source: originally from `ros2_ws/src/tlvcodec/`, moved here to remove the ROS2 dependency for standalone operation.
+Source: lives at `backend/tlvcodec/` as the standalone Python TLV codec used by `nuevo_bridge`.
 
 ### Authentication
 - JWT tokens issued at `/auth/login` (username + password from `users.json`)

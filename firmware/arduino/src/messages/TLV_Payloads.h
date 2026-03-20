@@ -1,6 +1,6 @@
 /**
  * @file TLV_Payloads.h
- * @brief Packed struct definitions for TLV message payloads (v2.0)
+ * @brief Packed struct definitions for TLV message payloads
  *
  * All structs use #pragma pack(push, 1) for wire format compatibility.
  * These payloads are used for communication between Raspberry Pi and Arduino
@@ -156,7 +156,7 @@ enum DCMotorMode : uint8_t {
 };
 
 /**
- * @brief DC motor enable/disable (RPi → Arduino) — TLV type DC_ENABLE (256)
+ * @brief DC motor enable/disable (RPi → Arduino) — TLV type DC_ENABLE
  *
  * Set mode=0 to disable. Set mode=1/2/3 to enable in selected mode.
  */
@@ -168,7 +168,7 @@ struct PayloadDCEnable {
 // 4 bytes
 
 /**
- * @brief DC motor set position (RPi → Arduino) — TLV type DC_SET_POSITION (257)
+ * @brief DC motor set position (RPi → Arduino) — TLV type DC_SET_POSITION
  *
  * Only effective in position mode (mode=1).
  */
@@ -181,7 +181,7 @@ struct PayloadDCSetPosition {
 // 12 bytes
 
 /**
- * @brief DC motor set velocity (RPi → Arduino) — TLV type DC_SET_VELOCITY (258)
+ * @brief DC motor set velocity (RPi → Arduino) — TLV type DC_SET_VELOCITY
  *
  * Only effective in velocity mode (mode=2).
  */
@@ -193,7 +193,7 @@ struct PayloadDCSetVelocity {
 // 8 bytes
 
 /**
- * @brief DC motor set direct PWM (RPi → Arduino) — TLV type DC_SET_PWM (259)
+ * @brief DC motor set direct PWM (RPi → Arduino) — TLV type DC_SET_PWM
  *
  * Only effective in PWM mode (mode=3).
  */
@@ -226,7 +226,7 @@ struct DCMotorStatus {
 // 2 + 4*4 + 2*2 + 6*4 = 2 + 16 + 4 + 24 = 46 bytes
 
 /**
- * @brief DC motor status for all motors (Arduino → RPi) — TLV type DC_STATUS_ALL (260)
+ * @brief DC motor status for all motors (Arduino → RPi) — TLV type DC_STATUS_ALL
  *
  * Rate: 25 Hz in RUNNING state.
  */
@@ -240,7 +240,7 @@ struct PayloadDCStatusAll {
 // ============================================================================
 
 /**
- * @brief Stepper motor enable/disable (RPi → Arduino) — TLV type STEP_ENABLE (512)
+ * @brief Stepper motor enable/disable (RPi → Arduino) — TLV type STEP_ENABLE
  */
 struct PayloadStepEnable {
     uint8_t stepperId;      // Stepper index (0–3)
@@ -250,7 +250,7 @@ struct PayloadStepEnable {
 // 4 bytes
 
 /**
- * @brief Stepper set motion parameters (RPi → Arduino) — TLV type STEP_SET_PARAMS (513)
+ * @brief Stepper set motion parameters (RPi → Arduino) — TLV type STEP_SET_PARAMS
  *
  * Replaces the old STEP_SET_ACCEL and STEP_SET_VEL messages.
  */
@@ -263,7 +263,7 @@ struct PayloadStepSetParams {
 // 12 bytes
 
 /**
- * @brief Stepper move command (RPi → Arduino) — TLV type STEP_MOVE (514)
+ * @brief Stepper move command (RPi → Arduino) — TLV type STEP_MOVE
  */
 enum StepMoveType : uint8_t {
     STEP_MOVE_ABSOLUTE = 0, // Move to absolute step count
@@ -279,7 +279,7 @@ struct PayloadStepMove {
 // 8 bytes
 
 /**
- * @brief Stepper homing command (RPi → Arduino) — TLV type STEP_HOME (515)
+ * @brief Stepper homing command (RPi → Arduino) — TLV type STEP_HOME
  *
  * Move stepper toward limit switch, then zero position and back off.
  */
@@ -323,7 +323,7 @@ struct StepperStatus {
 // 4 + 3*4 + 2*4 = 4 + 12 + 8 = 24 bytes
 
 /**
- * @brief Stepper status for all steppers (Arduino → RPi) — TLV type STEP_STATUS_ALL (516)
+ * @brief Stepper status for all steppers (Arduino → RPi) — TLV type STEP_STATUS_ALL
  *
  * Rate: 5 Hz in RUNNING state.
  */
@@ -337,7 +337,7 @@ struct PayloadStepStatusAll {
 // ============================================================================
 
 /**
- * @brief Servo channel enable/disable (RPi → Arduino) — TLV type SERVO_ENABLE (768)
+ * @brief Servo channel enable/disable (RPi → Arduino) — TLV type SERVO_ENABLE
  *
  * Per-channel control. All channels start disabled on reset.
  * channel=0xFF enables/disables all 16 channels at once.
@@ -350,7 +350,7 @@ struct PayloadServoEnable {
 // 4 bytes
 
 /**
- * @brief Servo set position — single channel (RPi → Arduino) — TLV type SERVO_SET (769)
+ * @brief Servo set position — single channel (RPi → Arduino) — TLV type SERVO_SET
  *
  * Use count=1 for a single servo or count>1 for consecutive bulk update.
  * Dispatcher reads 'count' to select single (4 bytes) or bulk (34 bytes).
@@ -363,7 +363,7 @@ struct PayloadServoSetSingle {
 // 4 bytes
 
 /**
- * @brief Servo bulk update — consecutive channels (RPi → Arduino) — TLV type SERVO_SET (769)
+ * @brief Servo bulk update — consecutive channels (RPi → Arduino) — TLV type SERVO_SET
  */
 struct PayloadServoSetBulk {
     uint8_t  startChannel;  // First channel to update
@@ -373,7 +373,7 @@ struct PayloadServoSetBulk {
 // 34 bytes
 
 /**
- * @brief Servo status all channels (Arduino → RPi) — TLV type SERVO_STATUS_ALL (770)
+ * @brief Servo status all channels (Arduino → RPi) — TLV type SERVO_STATUS_ALL
  *
  * Rate: 5 Hz in RUNNING state. Reports commanded state only (no feedback).
  */
@@ -390,7 +390,7 @@ struct PayloadServoStatusAll {
 // ============================================================================
 
 /**
- * @brief IMU sensor data (Arduino → RPi) — TLV type SENSOR_IMU (1024)
+ * @brief IMU sensor data (Arduino → RPi) — TLV type SENSOR_IMU
  *
  * Rate: 25 Hz in RUNNING state (if IMU attached).
  * Quaternion and earth-frame acceleration from Fusion AHRS (Madgwick).
@@ -420,7 +420,7 @@ struct PayloadSensorIMU {
 // 7*4 + 9*2 + 2*1 + 4 = 28 + 18 + 2 + 4 = 52 bytes
 
 /**
- * @brief Robot kinematics from wheel odometry (Arduino → RPi) — TLV type SENSOR_KINEMATICS (1025)
+ * @brief Robot kinematics from wheel odometry (Arduino → RPi) — TLV type SENSOR_KINEMATICS
  *
  * Rate: 25 Hz in RUNNING state.
  * Computed from encoder counts and the compile-time wheel geometry constants.
@@ -438,7 +438,7 @@ struct PayloadSensorKinematics {
 // 6*4 + 4 = 28 bytes
 
 /**
- * @brief Battery and rail voltages (Arduino → RPi) — TLV type SENSOR_VOLTAGE (1026)
+ * @brief Battery and rail voltages (Arduino → RPi) — TLV type SENSOR_VOLTAGE
  *
  * Rate: 5 Hz in RUNNING and ERROR states.
  */
@@ -451,7 +451,7 @@ struct PayloadSensorVoltage {
 // 8 bytes
 
 /**
- * @brief Range sensor reading (Arduino → RPi) — TLV type SENSOR_RANGE (1027)
+ * @brief Range sensor reading (Arduino → RPi) — TLV type SENSOR_RANGE
  *
  * One message per sensor reading. Rate depends on sensor polling frequency.
  */
@@ -467,7 +467,7 @@ struct PayloadSensorRange {
 // 12 bytes
 
 /**
- * @brief Magnetometer calibration command (RPi → Arduino) — TLV type SENSOR_MAG_CAL_CMD (1028)
+ * @brief Magnetometer calibration command (RPi → Arduino) — TLV type SENSOR_MAG_CAL_CMD
  *
  * IDLE state only. Ignored in RUNNING.
  */
@@ -489,7 +489,7 @@ struct PayloadMagCalCmd {
 // 16 bytes
 
 /**
- * @brief Magnetometer calibration status (Arduino → RPi) — TLV type SENSOR_MAG_CAL_STATUS (1029)
+ * @brief Magnetometer calibration status (Arduino → RPi) — TLV type SENSOR_MAG_CAL_STATUS
  *
  * Sent at ~5 Hz while calibration is active. Also sent once on complete/cancel.
  */
@@ -516,7 +516,7 @@ struct PayloadMagCalStatus {
 // ============================================================================
 
 /**
- * @brief Set LED state (RPi → Arduino) — TLV type IO_SET_LED (1280)
+ * @brief Set LED state (RPi → Arduino) — TLV type IO_SET_LED
  */
 enum LEDMode : uint8_t {
     LED_OFF     = 0,    // LED off
@@ -537,7 +537,7 @@ struct PayloadSetLED {
 // 8 bytes
 
 /**
- * @brief Set NeoPixel color (RPi → Arduino) — TLV type IO_SET_NEOPIXEL (1281)
+ * @brief Set NeoPixel color (RPi → Arduino) — TLV type IO_SET_NEOPIXEL
  *
  * index=0xFF sets all pixels simultaneously.
  */
@@ -550,7 +550,7 @@ struct PayloadSetNeoPixel {
 // 4 bytes
 
 /**
- * @brief All UserIO state (Arduino → RPi) — TLV type IO_STATUS (1282)
+ * @brief All UserIO state (Arduino → RPi) — TLV type IO_STATUS
  *
  * Rate: 25 Hz in RUNNING state.
  *

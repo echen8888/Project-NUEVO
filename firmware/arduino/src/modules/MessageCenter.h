@@ -1,9 +1,9 @@
 /**
  * @file MessageCenter.h
- * @brief Central message routing and TLV communication handler (v2.0)
+ * @brief Central message routing and compact TLV communication handler
  *
  * This module manages all UART communication with the Raspberry Pi:
- * - Receives and parses incoming TLV messages (v2.0 protocol)
+ * - Receives and parses incoming TLV messages (compact v3 wire format)
  * - Routes commands to appropriate subsystems (motors, servos, LEDs, IMU)
  * - Generates and sends outgoing telemetry at appropriate rates
  * - Monitors heartbeat and enforces liveness timeout
@@ -40,14 +40,14 @@
 #include "../config.h"
 #include "RobotKinematics.h"
 
-// Maximum TLV payload size we will accept from the RPi
-#define MAX_TLV_PAYLOAD_SIZE 256
+// Maximum TLV payload size we will accept from the RPi.
+// The compact v3 wire format uses uint8_t tlvLen, so 255 bytes is the hard cap.
+#define MAX_TLV_PAYLOAD_SIZE 255
 // RX frame storage only needs to hold the largest accepted inbound frame:
-//   28-byte FrameHeader + 8-byte TLV header + 256-byte payload + padding.
-#define RX_BUFFER_SIZE 384
+#define RX_BUFFER_SIZE 512
 // The bridge currently sends exactly one command TLV per frame. The largest
-// supported inbound command is SERVO_SET bulk: 28-byte frame header + 8-byte
-// TLV header + 34-byte payload = 70 bytes, padded to 72. Keep some margin, but
+// supported inbound command is SERVO_SET bulk: 12-byte frame header + 2-byte
+// TLV header + 34-byte payload = 48 bytes. Keep some margin, but
 // reject implausibly large inbound frames so a corrupted length field cannot
 // hold the decoder in WaitFullFrame long enough to trip liveness.
 #define RX_MAX_FRAME_ACCEPT_SIZE 96
@@ -67,7 +67,7 @@
  * @brief Central TLV message routing and communication handler
  *
  * Static class providing:
- * - TLV v2.0 message parsing and routing
+ * - Compact TLV message parsing and routing
  * - Firmware state machine management
  * - Batched telemetry generation and transmission
  * - Liveness monitoring and safety timeout
@@ -329,8 +329,8 @@ private:
      * @brief Reset the TX encoder for a new outgoing frame
      */
     static void beginFrame();
-    static bool appendTlv(uint32_t tlvType, uint16_t tlvLen, const void *dataAddr);
-    static bool appendTelemetryTlv(uint32_t tlvType, uint16_t tlvLen, const void *dataAddr);
+    static bool appendTlv(uint16_t tlvType, uint16_t tlvLen, const void *dataAddr);
+    static bool appendTelemetryTlv(uint16_t tlvType, uint16_t tlvLen, const void *dataAddr);
 
     /**
      * @brief Finalise and transmit the accumulated frame over RPI_SERIAL
@@ -364,7 +364,7 @@ private:
      * @param payload Pointer to message payload
      * @param length Payload length in bytes
      */
-    static void routeMessage(uint32_t type, const uint8_t *payload, uint32_t length);
+    static void routeMessage(uint8_t type, const uint8_t *payload, uint8_t length);
 
     /**
      * @brief Check liveness timeout and disable actuators if expired

@@ -115,7 +115,7 @@ class PayloadSetPID(ctypes.Structure):
 
 class PayloadDCEnable(ctypes.Structure):
     """
-    TLV Type: DC_ENABLE (256)  Direction: RPi → Arduino
+    TLV Type: DC_ENABLE  Direction: RPi → Arduino
     Size: 4 bytes
     mode: 0=disable, 1=position, 2=velocity, 3=pwm
     """
@@ -129,7 +129,7 @@ class PayloadDCEnable(ctypes.Structure):
 
 class PayloadDCSetPosition(ctypes.Structure):
     """
-    TLV Type: DC_SET_POSITION (257)  Direction: RPi → Arduino
+    TLV Type: DC_SET_POSITION  Direction: RPi → Arduino
     Size: 12 bytes
     Only effective in position mode (mode=1).
     """
@@ -144,7 +144,7 @@ class PayloadDCSetPosition(ctypes.Structure):
 
 class PayloadDCSetVelocity(ctypes.Structure):
     """
-    TLV Type: DC_SET_VELOCITY (258)  Direction: RPi → Arduino
+    TLV Type: DC_SET_VELOCITY  Direction: RPi → Arduino
     Size: 8 bytes
     Only effective in velocity mode (mode=2).
     """
@@ -158,7 +158,7 @@ class PayloadDCSetVelocity(ctypes.Structure):
 
 class PayloadDCSetPWM(ctypes.Structure):
     """
-    TLV Type: DC_SET_PWM (259)  Direction: RPi → Arduino
+    TLV Type: DC_SET_PWM  Direction: RPi → Arduino
     Size: 4 bytes
     Only effective in PWM mode (mode=3).
     """
@@ -196,7 +196,7 @@ class DCMotorStatus(ctypes.Structure):
 
 class PayloadDCStatusAll(ctypes.Structure):
     """
-    TLV Type: DC_STATUS_ALL (260)  Direction: Arduino → RPi
+    TLV Type: DC_STATUS_ALL  Direction: Arduino → RPi
     Size: 184 bytes (4 × 46)
     Rate: 100 Hz in RUNNING state.
     """
@@ -212,7 +212,7 @@ class PayloadDCStatusAll(ctypes.Structure):
 
 class PayloadStepEnable(ctypes.Structure):
     """
-    TLV Type: STEP_ENABLE (512)  Direction: RPi → Arduino
+    TLV Type: STEP_ENABLE  Direction: RPi → Arduino
     Size: 4 bytes
     enable: 0=disable (coil off), 1=enable (coil on, holds)
     """
@@ -226,7 +226,7 @@ class PayloadStepEnable(ctypes.Structure):
 
 class PayloadStepSetParams(ctypes.Structure):
     """
-    TLV Type: STEP_SET_PARAMS (513)  Direction: RPi → Arduino
+    TLV Type: STEP_SET_PARAMS  Direction: RPi → Arduino
     Size: 12 bytes
     Replaces old STEP_SET_ACCEL + STEP_SET_VEL messages.
     """
@@ -241,7 +241,7 @@ class PayloadStepSetParams(ctypes.Structure):
 
 class PayloadStepMove(ctypes.Structure):
     """
-    TLV Type: STEP_MOVE (514)  Direction: RPi → Arduino
+    TLV Type: STEP_MOVE  Direction: RPi → Arduino
     Size: 8 bytes
     moveType: 0=absolute, 1=relative
     """
@@ -256,7 +256,7 @@ class PayloadStepMove(ctypes.Structure):
 
 class PayloadStepHome(ctypes.Structure):
     """
-    TLV Type: STEP_HOME (515)  Direction: RPi → Arduino
+    TLV Type: STEP_HOME  Direction: RPi → Arduino
     Size: 12 bytes
     """
     _pack_ = 1
@@ -291,7 +291,7 @@ class StepperStatus(ctypes.Structure):
 
 class PayloadStepStatusAll(ctypes.Structure):
     """
-    TLV Type: STEP_STATUS_ALL (516)  Direction: Arduino → RPi
+    TLV Type: STEP_STATUS_ALL  Direction: Arduino → RPi
     Size: 96 bytes (4 × 24)
     Rate: 100 Hz in RUNNING state.
     """
@@ -307,7 +307,7 @@ class PayloadStepStatusAll(ctypes.Structure):
 
 class PayloadServoEnable(ctypes.Structure):
     """
-    TLV Type: SERVO_ENABLE (768)  Direction: RPi → Arduino
+    TLV Type: SERVO_ENABLE  Direction: RPi → Arduino
     Size: 4 bytes
     channel=0xFF enables/disables all 16 channels at once.
     """
@@ -321,7 +321,7 @@ class PayloadServoEnable(ctypes.Structure):
 
 class PayloadServoSetSingle(ctypes.Structure):
     """
-    TLV Type: SERVO_SET (769)  Direction: RPi → Arduino
+    TLV Type: SERVO_SET  Direction: RPi → Arduino
     Size: 4 bytes  (count must be 1)
     """
     _pack_ = 1
@@ -334,7 +334,7 @@ class PayloadServoSetSingle(ctypes.Structure):
 
 class PayloadServoSetBulk(ctypes.Structure):
     """
-    TLV Type: SERVO_SET (769)  Direction: RPi → Arduino
+    TLV Type: SERVO_SET  Direction: RPi → Arduino
     Size: 34 bytes  (count > 1)
     Bulk consecutive channel update.
     """
@@ -348,7 +348,7 @@ class PayloadServoSetBulk(ctypes.Structure):
 
 class PayloadServoStatusAll(ctypes.Structure):
     """
-    TLV Type: SERVO_STATUS_ALL (770)  Direction: Arduino → RPi
+    TLV Type: SERVO_STATUS_ALL  Direction: Arduino → RPi
     Size: 36 bytes
     Rate: 50 Hz in RUNNING state.
     """
@@ -367,7 +367,7 @@ class PayloadServoStatusAll(ctypes.Structure):
 
 class PayloadSensorIMU(ctypes.Structure):
     """
-    TLV Type: SENSOR_IMU (1024)  Direction: Arduino → RPi
+    TLV Type: SENSOR_IMU  Direction: Arduino → RPi
     Size: 52 bytes
     Rate: 100 Hz in RUNNING state (if IMU attached).
     Quaternion and earth-frame acceleration from Fusion AHRS (Madgwick).
@@ -398,7 +398,7 @@ class PayloadSensorIMU(ctypes.Structure):
 
 class PayloadSensorKinematics(ctypes.Structure):
     """
-    TLV Type: SENSOR_KINEMATICS (1025)  Direction: Arduino → RPi
+    TLV Type: SENSOR_KINEMATICS  Direction: Arduino → RPi
     Size: 28 bytes
     Rate: 100 Hz in RUNNING state.
     Differential-drive wheel odometry. Resets on SYS_CONFIG(resetOdometry=1).
@@ -417,7 +417,7 @@ class PayloadSensorKinematics(ctypes.Structure):
 
 class PayloadSensorVoltage(ctypes.Structure):
     """
-    TLV Type: SENSOR_VOLTAGE (1026)  Direction: Arduino → RPi
+    TLV Type: SENSOR_VOLTAGE  Direction: Arduino → RPi
     Size: 8 bytes
     Rate: 10 Hz in RUNNING and ERROR states.
     """
@@ -432,7 +432,7 @@ class PayloadSensorVoltage(ctypes.Structure):
 
 class PayloadSensorRange(ctypes.Structure):
     """
-    TLV Type: SENSOR_RANGE (1027)  Direction: Arduino → RPi
+    TLV Type: SENSOR_RANGE  Direction: Arduino → RPi
     Size: 12 bytes
     sensorType: 0=ultrasonic, 1=lidar
     status: 0=valid, 1=out of range, 2=sensor error, 3=not installed (configured but absent)
@@ -451,7 +451,7 @@ class PayloadSensorRange(ctypes.Structure):
 
 class PayloadMagCalCmd(ctypes.Structure):
     """
-    TLV Type: SENSOR_MAG_CAL_CMD (1028)  Direction: RPi → Arduino
+    TLV Type: SENSOR_MAG_CAL_CMD  Direction: RPi → Arduino
     Size: 16 bytes
     command: 1=START, 2=STOP, 3=SAVE, 4=APPLY (use offsetX/Y/Z), 5=CLEAR
     IDLE state only. Ignored in RUNNING.
@@ -468,7 +468,7 @@ class PayloadMagCalCmd(ctypes.Structure):
 
 class PayloadMagCalStatus(ctypes.Structure):
     """
-    TLV Type: SENSOR_MAG_CAL_STATUS (1029)  Direction: Arduino → RPi
+    TLV Type: SENSOR_MAG_CAL_STATUS  Direction: Arduino → RPi
     Size: 44 bytes
     state: 0=idle, 1=sampling, 2=complete, 3=saved, 4=error
     Sent at ~10 Hz while calibration is active.
@@ -498,7 +498,7 @@ class PayloadMagCalStatus(ctypes.Structure):
 
 class PayloadSetLED(ctypes.Structure):
     """
-    TLV Type: IO_SET_LED (1280)  Direction: RPi → Arduino
+    TLV Type: IO_SET_LED  Direction: RPi → Arduino
     Size: 8 bytes
     mode: 0=off, 1=on, 2=blink, 3=breathe, 4=pwm
     """
@@ -515,7 +515,7 @@ class PayloadSetLED(ctypes.Structure):
 
 class PayloadSetNeoPixel(ctypes.Structure):
     """
-    TLV Type: IO_SET_NEOPIXEL (1281)  Direction: RPi → Arduino
+    TLV Type: IO_SET_NEOPIXEL  Direction: RPi → Arduino
     Size: 4 bytes
     index=0xFF sets all pixels simultaneously.
     """
@@ -530,7 +530,7 @@ class PayloadSetNeoPixel(ctypes.Structure):
 
 class PayloadIOStatus(ctypes.Structure):
     """
-    TLV Type: IO_STATUS (1282)  Direction: Arduino → RPi
+    TLV Type: IO_STATUS  Direction: Arduino → RPi
     Size: 12 bytes fixed  (+ 3 × neoPixelCount bytes appended)
     Rate: 100 Hz in RUNNING state.
 

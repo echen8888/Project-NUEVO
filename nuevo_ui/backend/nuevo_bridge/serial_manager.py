@@ -38,7 +38,7 @@ from .payloads import (
     PayloadHeartbeat, PayloadSysCmd,
     PayloadSystemStatus, PayloadDCStatusAll, PayloadStepStatusAll,
     PayloadServoStatusAll, PayloadSensorIMU, PayloadSensorKinematics,
-    PayloadSensorVoltage, PayloadIOStatus,
+    PayloadSensorVoltage, PayloadSensorRange, PayloadIOStatus,
     DCMotorStatus, StepperStatus,
 )
 from .TLV_TypeDefs import (
@@ -46,8 +46,8 @@ from .TLV_TypeDefs import (
     DC_ENABLE, DC_SET_VELOCITY, DC_SET_POSITION, DC_SET_PWM,
     DC_STATUS_ALL, STEP_ENABLE, STEP_SET_PARAMS, STEP_MOVE, STEP_HOME,
     STEP_STATUS_ALL, SERVO_ENABLE, SERVO_SET, SERVO_STATUS_ALL,
-    SENSOR_IMU, SENSOR_KINEMATICS, SENSOR_VOLTAGE, IO_SET_LED,
-    IO_SET_NEOPIXEL, IO_STATUS,
+    SENSOR_IMU, SENSOR_KINEMATICS, SENSOR_VOLTAGE, SENSOR_RANGE,
+    IO_SET_LED, IO_SET_NEOPIXEL, IO_STATUS,
 )
 
 import sys
@@ -514,7 +514,7 @@ class _ArduinoSim:
         self.heartbeat_timeout_ms = 500
         self.limit_switch_mask = 0
         self.stepper_home_limit = [0xFF, 0xFF, 0xFF, 0xFF]
-        self.attached_sensors  = 0x01   # IMU present
+        self.attached_sensors  = 0x07   # IMU + Lidar + Ultrasonic present
 
         self.dc = [_DC() for _ in range(4)]
         self.steppers = [_Stepper() for _ in range(4)]
@@ -599,7 +599,8 @@ class _ArduinoSim:
         v_left  = self.dc[0].velocity * mm_per_tick
         v_right = self.dc[1].velocity * mm_per_tick
         v_angular = (v_right - v_left) / self.wheel_base_mm
-        self.imu_yaw += v_angular * dt + random.gauss(0, 0.0005)
+        # Slow continuous yaw rotation (0.35 rad/s ≈ full turn every ~18 s)
+        self.imu_yaw += (0.35 + v_angular) * dt + random.gauss(0, 0.0005)
 
     def _euler_to_quat(self, yaw, pitch, roll):
         cy = math.cos(yaw * 0.5);   sy = math.sin(yaw * 0.5)
@@ -887,32 +888,51 @@ class MockSerialManager:
 
     def _gen_sensor_imu(self):
         a = self.arduino
+        t = a.uptime_us / 1_000_000.0  # seconds since boot
+
+        # Animate pitch and roll as independent sinusoids
+        # Pitch: ±25° (0.44 rad), period ~16 s
+        # Roll:  ±18° (0.31 rad), period ~22 s, phase-shifted
+        PITCH_AMP = 0.44;  PITCH_W = 0.40
+        ROLL_AMP  = 0.31;  ROLL_W  = 0.285
+        a.imu_pitch = PITCH_AMP * math.sin(PITCH_W * t)
+        a.imu_roll  = ROLL_AMP  * math.sin(ROLL_W  * t + 1.2)
+
         qw, qx, qy, qz = a._euler_to_quat(a.imu_yaw, a.imu_pitch, a.imu_roll)
 
         mm_per_tick = _MM_PER_TICK
         v_left  = a.dc[0].velocity * mm_per_tick
         v_right = a.dc[1].velocity * mm_per_tick
 
+        # Angular rates (rad/s) — derivative of sinusoids
+        pitch_rate = PITCH_AMP * PITCH_W * math.cos(PITCH_W * t)          # rad/s
+        roll_rate  = ROLL_AMP  * ROLL_W  * math.cos(ROLL_W  * t + 1.2)    # rad/s
+        yaw_rate   = 0.35 + (v_right - v_left) / a.wheel_base_mm          # rad/s
+
         p = PayloadSensorIMU()
         p.quatW = qw;  p.quatX = qx;  p.quatY = qy;  p.quatZ = qz
 
-        p.earthAccX = float(random.gauss(0, 0.005))
-        p.earthAccY = float(random.gauss(0, 0.003))
-        p.earthAccZ = float(random.gauss(0, 0.002))
+        # Earth-frame linear acceleration — correlated with tilt (gravity projection)
+        p.earthAccX = float( math.sin(a.imu_pitch) * 0.30 + random.gauss(0, 0.004))
+        p.earthAccY = float(-math.sin(a.imu_roll)  * 0.22 + random.gauss(0, 0.004))
+        p.earthAccZ = float(random.gauss(0, 0.003))
 
-        p.rawAccX = int(_clamp(random.gauss(0, 5), -32768, 32767))
-        p.rawAccY = int(_clamp(random.gauss(0, 3), -32768, 32767))
-        p.rawAccZ = int(_clamp(-9810 + random.gauss(0, 15), -32768, 32767))
+        # Raw accel in sensor frame (mg): gravity 9810 mg on Z when level
+        p.rawAccX = int(_clamp(math.sin(a.imu_pitch) * 9810 + random.gauss(0, 8), -32768, 32767))
+        p.rawAccY = int(_clamp(math.sin(a.imu_roll)  * 9810 + random.gauss(0, 8), -32768, 32767))
+        p.rawAccZ = int(_clamp(-9810 * math.cos(a.imu_pitch) * math.cos(a.imu_roll) + random.gauss(0, 12), -32768, 32767))
 
-        v_angular = (v_right - v_left) / a.wheel_base_mm
-        gyro_z_dps = math.degrees(v_angular) * 10.0
-        p.rawGyroX = int(_clamp(random.gauss(0, 2), -32768, 32767))
-        p.rawGyroY = int(_clamp(random.gauss(0, 2), -32768, 32767))
-        p.rawGyroZ = int(_clamp(gyro_z_dps + random.gauss(0, 3), -32768, 32767))
+        # Raw gyro in 0.1 DPS units
+        p.rawGyroX = int(_clamp(math.degrees(pitch_rate) * 10 + random.gauss(0, 2), -32768, 32767))
+        p.rawGyroY = int(_clamp(math.degrees(roll_rate)  * 10 + random.gauss(0, 2), -32768, 32767))
+        p.rawGyroZ = int(_clamp(math.degrees(yaw_rate)   * 10 + random.gauss(0, 2), -32768, 32767))
 
-        p.magX = int(_clamp(25 + random.gauss(0, 2), -32768, 32767))
-        p.magY = int(_clamp(-5 + random.gauss(0, 2), -32768, 32767))
-        p.magZ = int(_clamp(-42 + random.gauss(0, 2), -32768, 32767))
+        # Magnetometer: horizontal field rotates with yaw (north = yaw=0 direction)
+        MAG_H = 28.0   # µT horizontal component
+        MAG_Z = -42.0  # µT vertical component
+        p.magX = int(_clamp(MAG_H * math.cos(a.imu_yaw) + random.gauss(0, 1), -32768, 32767))
+        p.magY = int(_clamp(MAG_H * math.sin(a.imu_yaw) + random.gauss(0, 1), -32768, 32767))
+        p.magZ = int(_clamp(MAG_Z + random.gauss(0, 1), -32768, 32767))
 
         p.magCalibrated = 0
         p.timestamp     = a.uptime_us & 0xFFFFFFFF
@@ -943,6 +963,28 @@ class MockSerialManager:
         p.rail5vMv    = int(_clamp(a.rail5v_mv  + random.gauss(0, 3), 0, 65535))
         p.servoRailMv = 0
         self._emit(SENSOR_VOLTAGE, p)
+
+    def _gen_sensor_range(self):
+        a = self.arduino
+        t = a.uptime_us / 1_000_000.0  # seconds since boot
+
+        # Sensor 0: Lidar — distance oscillates 200–1500 mm
+        p0 = PayloadSensorRange()
+        p0.sensorId   = 0
+        p0.sensorType = 1   # lidar
+        p0.status     = 0   # valid
+        p0.distanceMm = int(850 + 650 * math.sin(t * 0.5))
+        p0.timestamp  = a.uptime_us & 0xFFFFFFFF
+        self._emit(SENSOR_RANGE, p0)
+
+        # Sensor 1: Ultrasonic — distance oscillates 50–300 mm
+        p1 = PayloadSensorRange()
+        p1.sensorId   = 1
+        p1.sensorType = 0   # ultrasonic
+        p1.status     = 0   # valid
+        p1.distanceMm = int(175 + 125 * math.sin(t * 0.8 + 1.0))
+        p1.timestamp  = a.uptime_us & 0xFFFFFFFF
+        self._emit(SENSOR_RANGE, p1)
 
     def _gen_io_status(self):
         a = self.arduino
@@ -1007,6 +1049,7 @@ class MockSerialManager:
                     self._gen_servo_status_all()
                     self._gen_sensor_imu()
                     self._gen_sensor_kinematics()
+                    self._gen_sensor_range()
                     self._gen_io_status()
 
                 if self._tick % self._TICK_VOLTAGE == 0:
