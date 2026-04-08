@@ -74,6 +74,7 @@ def run(robot: Robot) -> None:
 
     state = "INIT"
     drive_handle = None
+    planner1 = None
     # FSM refresh rate control
     period = 1.0 / float(DEFAULT_FSM_HZ)
     next_tick = time.monotonic()
@@ -117,11 +118,7 @@ def run(robot: Robot) -> None:
             current_theta_rad = math.radians(current_theta_deg)
         
             # Step 3: manually advance the remaining path
-            while len(remaining_path) > 1 and math.hypot(
-                remaining_path[0][0] - current_x,
-                remaining_path[0][1] - current_y
-            ) < 20.0:
-                remaining_path.pop(0)
+            remaining_path = robot._advance_remaining_path(remaining_path,current_x,current_y, advance_radius_mm = LOOKAHEAD_DIST)
         
             # Step 4: calculate current pursuit point
             current_pursuit_x, current_pursuit_y = planner1._lookahead_point(
@@ -141,16 +138,12 @@ def run(robot: Robot) -> None:
             robot.set_velocity(linear_vel, math.degrees(angular_vel))
         
             # Step 7: check whether current target is reached
-            if planner1.CurrentTargetReached(
-                current_pursuit_x,
-                current_pursuit_y,
-                current_x,
-                current_y
-            ):
-                print("MOVING: Target reached! Stopping.")
+            # Stop ONLY when entire path is complete
+            if len(remaining_path) <= 1:
+                print("MOVING: Final goal reached! Stopping.")
                 robot.stop()
                 print("[FSM] IDLE")
-                state = "IDLE"
+                state = "IDLE
         
             # Step 8: debug prints
             print(f"Current Pose: ({current_x:.1f}, {current_y:.1f}, {current_theta_deg:.1f} deg)")
