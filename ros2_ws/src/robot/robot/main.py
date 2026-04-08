@@ -85,14 +85,9 @@ def run(robot: Robot) -> None:
             path_control_points = [ 
                 (0.0, 0.0),
                 (0.0, 500.0),
-                (110.0, 610.0),
-                (500.0, 610.0),
-                (610.0, 500.0),
-                (610.0, 110.0),
+                (500.0, 500.0),
                 (500.0, 0.0),
-                (110.0, 0.0),
-                (0.0, 110.0),
-                (0.0, 0.0),
+                (0.0, 0.0)
             ]    
             path1 = densify_polyline(path_control_points, spacing=20.0)
             remaining_path = path1.copy() 
