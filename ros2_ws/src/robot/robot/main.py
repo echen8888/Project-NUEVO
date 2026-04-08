@@ -121,34 +121,31 @@ def run(robot: Robot) -> None:
             # Step 2: convert heading to radians
             current_theta_rad = math.radians(current_theta_deg)
         
-            # Step 3: advance remaining path
-            remaining_path = planner1._advance_remaining_path(
-                remaining_path,
-                current_x,
-                current_y,
-                20.0
-            )
+            # Step 3: manually advance the remaining path
+            while len(remaining_path) > 1 and math.hypot(
+                remaining_path[0][0] - current_x,
+                remaining_path[0][1] - current_y
+            ) < 20.0:
+                remaining_path.pop(0)
         
-            # Step 4: compute current pursuit point
+            # Step 4: calculate current pursuit point
             current_pursuit_x, current_pursuit_y = planner1._lookahead_point(
-                remaining_path,
-                current_x,
-                current_y
-            )
-        
-            # Step 5: compute velocity commands
-            linear_vel, angular_vel = planner1.compute_velocity(
                 current_x,
                 current_y,
-                current_theta_rad,
-                current_pursuit_x,
-                current_pursuit_y
+                remaining_path
             )
         
-            # Step 6: send commands to robot
+            # Step 5: compute linear and angular velocity
+            linear_vel, angular_vel = planner1.compute_velocity(
+                (current_x, current_y, current_theta_rad),
+                remaining_path,
+                max_linear=120.0
+            )
+        
+            # Step 6: send velocity commands
             robot.set_velocity(linear_vel, angular_vel)
         
-            # Step 7: stop when target reached
+            # Step 7: check whether current target is reached
             if planner1.CurrentTargetReached(
                 current_pursuit_x,
                 current_pursuit_y,
@@ -162,7 +159,7 @@ def run(robot: Robot) -> None:
         
             # Step 8: debug prints
             print(f"Current Pose: ({current_x:.1f}, {current_y:.1f}, {current_theta_deg:.1f} deg)")
-            print(f"Current Pursuit Point: ({current_pursuit_x:.1f}, {current_pursuit_y:.1f})")            
+            print(f"Current Pursuit Point: ({current_pursuit_x:.1f}, {current_pursuit_y:.1f})")           
             print("Finish your code in Task 2") # Delete this line after you finish Task 2
             
         # FSM refresh rate control
