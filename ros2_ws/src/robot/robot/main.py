@@ -138,7 +138,7 @@ def run(robot: Robot) -> None:
             )
         
             # Step 6: send velocity commands
-            robot.set_velocity(linear_vel, angular_vel)
+            robot.set_velocity(linear_vel, math.degrees(angular_vel))
         
             # Step 7: check whether current target is reached
             if planner1.CurrentTargetReached(
