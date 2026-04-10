@@ -81,10 +81,18 @@ class GroundLocalizer(Node):
 
         self._obj_pts = _MARKER_OBJ_PTS_UNIT * self._marker_size
 
-        # ── OpenCV ArUco detector (new API, OpenCV ≥ 4.7) ─────────────────
+        # ── OpenCV ArUco detector (supports both 4.6 and ≥ 4.7 APIs) ────────
         aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-        aruco_params = cv2.aruco.DetectorParameters()
-        self._detector = cv2.aruco.ArucoDetector(aruco_dict, aruco_params)
+        if hasattr(cv2.aruco, "ArucoDetector"):
+            # OpenCV ≥ 4.7
+            aruco_params = cv2.aruco.DetectorParameters()
+            self._detector = cv2.aruco.ArucoDetector(aruco_dict, aruco_params)
+            self._use_new_aruco_api = True
+        else:
+            # OpenCV 4.6 (shipped with Ubuntu 24.04 apt python3-opencv)
+            self._aruco_dict = aruco_dict
+            self._aruco_params = cv2.aruco.DetectorParameters_create()
+            self._use_new_aruco_api = False
 
         # ── State ──────────────────────────────────────────────────────────
         self._bridge = CvBridge()
@@ -143,7 +151,12 @@ class GroundLocalizer(Node):
         rgb = self._bridge.imgmsg_to_cv2(rgb_msg, desired_encoding="bgr8")
         gray = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)
 
-        corners, ids, _ = self._detector.detectMarkers(gray)
+        if self._use_new_aruco_api:
+            corners, ids, _ = self._detector.detectMarkers(gray)
+        else:
+            corners, ids, _ = cv2.aruco.detectMarkers(
+                gray, self._aruco_dict, parameters=self._aruco_params
+            )
 
         if ids is None:
             return
