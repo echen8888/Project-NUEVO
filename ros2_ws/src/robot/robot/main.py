@@ -85,9 +85,9 @@ def run(robot: Robot) -> None:
             print("[FSM] INIT (odometry reset)")
             path_control_points = [ 
                 (0.0, 0.0),
-                (0.0, 61.0),
-                (61.0, 61.0),
-                (61.0, 0.0),
+                (0.0, 610.0),
+                (610.0, 610.0),
+                (610.0, 0.0),
                 (0.0, 0.0)
             ]    
             path1 = densify_polyline(path_control_points, spacing=20.0)
@@ -105,6 +105,8 @@ def run(robot: Robot) -> None:
                     max_angular=1.5, # Max angular velocity in rad/s (adjust as needed)
                     goal_tolerance=20.0, # Distance in mm to consider the target reached (adjust as needed)
              )
+                remaining_path = path1.copy()
+                
                 print("Pure Pursuit Planner is initialized. Start Moving!")
                 print("[FSM] MOVING")
                 state = "MOVING"
