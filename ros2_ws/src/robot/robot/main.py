@@ -92,7 +92,7 @@ def run(robot: Robot) -> None:
                 lookahead_mm=300.0,
                 advance_radius_mm=100.0,
                 tolerance_mm=100.0,
-                gains_of_costs=[1.2, 0.3, 0.0, 0.2, 0.1], # [gain_goal, gain_heading, gain_obs_base, gain_speed, gain_path]
+                gains_of_costs=[1.2, 0.3, 0., 0.2, 0.1], # [gain_goal, gain_heading, gain_obs_base, gain_speed, gain_path]
                 period=period,
                 predict_time=2.0,
                 predict_velocity_samples_resolution=[10.0, 0.1],
@@ -113,7 +113,7 @@ def run(robot: Robot) -> None:
 
         elif state == "MOVING":
             show_moving_leds(robot)
-            # robot._draw_lidar_obstacles()
+            robot._draw_lidar_obstacles()
             state = robot._nav_follow_path_loop(path, period)
 
         # FSM refresh rate control

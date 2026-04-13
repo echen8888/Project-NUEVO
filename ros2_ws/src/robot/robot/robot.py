@@ -1633,17 +1633,8 @@ class Robot:
         )
 
     def _nav_follow_path_loop(self, path, period: float):
-        # BUG (race condition + permanent mutation): self._obstacles_mm is written by
-        # _on_lidar under self._lock, but read and overwritten here without the lock.
-        # Additionally, writing the rotated result back to self._obstacles_mm means the
-        # 180° correction accumulates across loop iterations: if the loop fires twice
-        # before the next lidar scan, the obstacles are rotated 360° (no-op), then 180°
-        # on the third call, oscillating between correct and mirrored positions.
-        # Fix: copy under the lock and apply the rotation to a local variable only.
-        if self._obstacles_mm.size != 0:
-            # lidar orientation due to installation is 180 deg rotated from robot forward, so rotate obstacles accordingly
-            self._obstacles_mm = (np.array([[np.cos(np.pi), -np.sin(np.pi)], [np.sin(np.pi), np.cos(np.pi)]]).T @ self._obstacles_mm.T).T
-        v, w = self.planner.compute_velocity(path, self._pose, self._vel, self._obstacles_mm, period)
+        obstacles = self._obstacles_mm.copy()
+        v, w = self.planner.compute_velocity(path, self._pose, self._vel, obstacles, period)
         # print(f"Computed velocity: linear={v:.1f} mm/s, angular={math.degrees(w):.1f} deg/s")
         self.set_velocity(v, math.degrees(w))
         print(f"Current Pose: ({self._pose[0]:.1f}, {self._pose[1]:.1f}, {math.degrees(self._pose[2]):.1f} deg)")
@@ -1665,7 +1656,7 @@ class Robot:
             # lidar orientation due to installation is 180 deg rotated from robot forward, so rotate obstacles accordingly
             obstacles = (np.array([[np.cos(np.pi), -np.sin(np.pi)], [np.sin(np.pi), np.cos(np.pi)]]) @ self._obstacles_mm.T).T
             # since some robot parts (e.g., the arm) may cause obstacles to be detected, we can filter out those obstacles behind the lidar.
-            obstacles = obstacles[obstacles[:,0] > 0,:]
+            # obstacles = obstacles[obstacles[:,0] > 0,:]
             # transform obstacles from robot frame to world frame.
             obstacles = (np.array([[np.cos(self._pose[2]), -np.sin(self._pose[2])], [np.sin(self._pose[2]), np.cos(self._pose[2])]]) @ obstacles.T).T + np.array([[self._pose[0], self._pose[1]],])
             self.ax.scatter(obstacles[:, 0] / 1000.0, obstacles[:, 1] / 1000.0, s=5)

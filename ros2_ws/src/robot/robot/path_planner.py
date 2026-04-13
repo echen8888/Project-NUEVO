@@ -307,7 +307,7 @@ class DWAPlanner():
             # lidar orientation due to installation is 180 deg rotated from robot forward, so rotate obstacles accordingly
             obstacles = (np.array([[np.cos(np.pi), -np.sin(np.pi)], [np.sin(np.pi), np.cos(np.pi)]]) @ obstacles.T).T
             # since some robot parts (e.g., the arm) may cause obstacles to be detected, we can filter out those obstacles behind the lidar.
-            obstacles = obstacles[obstacles[:,0] > 0,:]
+            # obstacles = obstacles[obstacles[:,0] > 0,:]
             # transform obstacles from robot frame to world frame.
             obstacles = (np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]]) @ obstacles.T).T + np.array([[x, y],])
             obstacles = obstacles[np.linalg.norm(obstacles-np.float64([[x, y]]), axis=1)<self.obstacles_range,:]
