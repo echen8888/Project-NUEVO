@@ -261,6 +261,15 @@ class Robot:
         node.create_subscription(IOInputState,     '/io_input_state',    self._on_io_input,    10)
         node.create_subscription(IOOutputState,    '/io_output_state',   self._on_io_output,   10)
         node.create_subscription(SysOdomParamRsp,  '/sys_odom_param_rsp', self._on_odom_param_rsp, 10)
+        # QoS NOTE: the integer `10` creates QoSProfile(depth=10, reliability=RELIABLE).
+        # rplidar_node also publishes RELIABLE so the connection is made, but depth=10
+        # lets up to 10 stale scans queue in DDS when the spin thread is delayed.
+        # The callback then fires on the oldest queued scan, making obstacle data stale.
+        # Fix: use BEST_EFFORT + depth=1 (SensorDataQoS) so only the latest scan is kept:
+        #   from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+        #   _LIDAR_QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
+        #                           history=HistoryPolicy.KEEP_LAST, depth=1)
+        # RELIABLE publisher + BEST_EFFORT subscriber is a valid pairing in ROS2.
         node.create_subscription(LaserScan,         '/scan',              self._on_lidar,          10)
 
         # ── Service clients ───────────────────────────────────────────────────
