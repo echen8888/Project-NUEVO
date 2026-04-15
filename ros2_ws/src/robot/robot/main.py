@@ -99,7 +99,7 @@ def run(robot: Robot) -> None:
             show_idle_leds(robot)
             print("[FSM] IDLE - Press BTN_1 to enter MOVING state.")
             if robot.get_button(Button.BTN_1):
-                LOOKAHEAD_DIST = 50.0 # Lookahead distance in mm (adjust as needed)
+                LOOKAHEAD_DIST = 200.0 # Lookahead distance in mm (adjust as needed)
                 ADVANCE_DIST = 20.0
                 planner1 = PurePursuitPlanner(
                     lookahead_dist=LOOKAHEAD_DIST, 
