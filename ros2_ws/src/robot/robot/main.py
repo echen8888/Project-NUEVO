@@ -145,7 +145,7 @@ def run(robot: Robot) -> None:
                 print("MOVING: Final goal reached! Stopping.")
                 robot.stop()
                 print("[FSM] IDLE")
-                state = "IDLE
+                state = "IDLE"
         
             # Step 8: debug prints
             print(f"Current Pose: ({current_x:.1f}, {current_y:.1f}, {current_theta_deg:.1f} deg)")
