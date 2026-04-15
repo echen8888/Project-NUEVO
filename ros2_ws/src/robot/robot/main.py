@@ -86,7 +86,9 @@ def run(robot: Robot) -> None:
             path_control_points = [ 
                 (0.0, 0.0),
                 (0.0, 610.0),
+                (305.0, 610.0),
                 (610.0, 610.0),
+                (610.0, 305.0),
                 (610.0, 0.0),
                 (0.0, 0.0)
             ]    
@@ -99,8 +101,8 @@ def run(robot: Robot) -> None:
             show_idle_leds(robot)
             print("[FSM] IDLE - Press BTN_1 to enter MOVING state.")
             if robot.get_button(Button.BTN_1):
-                LOOKAHEAD_DIST = 200000.0 # Lookahead distance in mm (adjust as needed)
-                ADVANCE_DIST = 20.0
+                LOOKAHEAD_DIST = 50.0 # Lookahead distance in mm (adjust as needed)
+                
                 planner1 = PurePursuitPlanner(
                     lookahead_dist=LOOKAHEAD_DIST, 
                     max_angular=1.5, # Max angular velocity in rad/s (adjust as needed)
