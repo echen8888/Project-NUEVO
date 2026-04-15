@@ -85,11 +85,9 @@ def run(robot: Robot) -> None:
             print("[FSM] INIT (odometry reset)")
             path_control_points = [ 
                 (0.0, 0.0),
-                (0.0, 510.0),
-                (305.0, 510.0),
-                (510.0, 510.0),
-                (510.0, 305.0),
-                (510.0, 0.0),
+                (0.0, 610.0),
+                (610.0, 610.0),
+                (610.0, 0.0),
                 (0.0, 0.0)
             ]    
             path1 = densify_polyline(path_control_points, spacing=20.0)
