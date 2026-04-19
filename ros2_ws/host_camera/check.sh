@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/../.." && pwd)"
+compose_file="${repo_root}/ros2_ws/docker/docker-compose.rpi.yml"
+env_file="${NUEVO_CAMERA_ENV_FILE:-/etc/default/nuevo-pi-camera}"
+
+if [[ -r "$env_file" ]]; then
+    # shellcheck disable=SC1090
+    source "$env_file"
+elif [[ -r "${script_dir}/nuevo-pi-camera.env" ]]; then
+    # shellcheck disable=SC1091
+    source "${script_dir}/nuevo-pi-camera.env"
+fi
+
+: "${NUEVO_CAMERA_DEVICE:=/dev/video10}"
+: "${NUEVO_CAMERA_CARD_LABEL:=NUEVO Pi Camera}"
+
+out_dir="/tmp/nuevo_camera_check"
+host_img="${out_dir}/host_loopback.jpg"
+docker_img="${out_dir}/docker_loopback.jpg"
+docker_tmp="/tmp/nuevo_camera_check_docker.jpg"
+pass_count=0
+fail_count=0
+
+mkdir -p "$out_dir"
+rm -f "$host_img" "$docker_img"
+
+section() {
+    printf '\n-- %s --\n' "$1"
+}
+
+pass() {
+    printf 'PASS: %s\n' "$1"
+    pass_count=$((pass_count + 1))
+}
+
+fail() {
+    printf 'FAIL: %s\n' "$1"
+    fail_count=$((fail_count + 1))
+}
+
+info() {
+    printf 'INFO: %s\n' "$1"
+}
+
+run_capture() {
+    local device="$1"
+    local output="$2"
+    shift 2
+    "$@" timeout 8 ffmpeg \
+        -nostdin \
+        -y \
+        -loglevel error \
+        -f v4l2 \
+        -input_format yuyv422 \
+        -i "$device" \
+        -vframes 1 \
+        "$output"
+}
+
+section "Native camera enumeration"
+if command -v rpicam-hello >/dev/null 2>&1; then
+    camera_list="$(rpicam-hello --list-cameras 2>&1 || true)"
+    printf '%s\n' "$camera_list" | sed 's/^/  /'
+    if printf '%s\n' "$camera_list" | grep -Eq 'imx219|^[[:space:]]*[0-9]+[[:space:]]*:'; then
+        pass "native libcamera can enumerate a camera"
+    else
+        fail "native libcamera did not report a camera"
+    fi
+else
+    fail "rpicam-hello is not installed; run ./ros2_ws/host_camera/install.sh"
+fi
+
+section "Kernel module"
+if lsmod | awk '{print $1}' | grep -qx v4l2loopback; then
+    pass "v4l2loopback module is loaded"
+else
+    fail "v4l2loopback module is not loaded; run ./ros2_ws/host_camera/install.sh"
+fi
+
+section "Virtual camera device"
+if [[ -c "$NUEVO_CAMERA_DEVICE" ]]; then
+    pass "$NUEVO_CAMERA_DEVICE exists"
+    if command -v v4l2-ctl >/dev/null 2>&1; then
+        device_info="$(v4l2-ctl --device="$NUEVO_CAMERA_DEVICE" --info 2>&1 || true)"
+        printf '%s\n' "$device_info" | sed 's/^/  /'
+        if printf '%s\n' "$device_info" | grep -Fq "$NUEVO_CAMERA_CARD_LABEL"; then
+            pass "$NUEVO_CAMERA_DEVICE has expected card label"
+        else
+            fail "$NUEVO_CAMERA_DEVICE does not show expected label '$NUEVO_CAMERA_CARD_LABEL'"
+        fi
+    else
+        fail "v4l2-ctl is not installed"
+    fi
+else
+    fail "$NUEVO_CAMERA_DEVICE does not exist"
+fi
+
+section "systemd service"
+service_status="$(systemctl is-active nuevo-pi-camera-feed.service 2>/dev/null || true)"
+if [[ "$service_status" == "active" ]]; then
+    pass "nuevo-pi-camera-feed.service is active"
+else
+    fail "nuevo-pi-camera-feed.service is ${service_status:-missing}; run sudo systemctl status nuevo-pi-camera-feed"
+fi
+
+section "Loopback formats"
+if [[ -c "$NUEVO_CAMERA_DEVICE" ]] && command -v v4l2-ctl >/dev/null 2>&1; then
+    formats="$(v4l2-ctl --device="$NUEVO_CAMERA_DEVICE" --list-formats-ext 2>&1 || true)"
+    printf '%s\n' "$formats" | sed -n '1,16p' | sed 's/^/  /'
+    if printf '%s\n' "$formats" | grep -Eq 'YUYV|YUY2|MJPG|Motion-JPEG'; then
+        pass "$NUEVO_CAMERA_DEVICE advertises a usable pixel format"
+    else
+        fail "$NUEVO_CAMERA_DEVICE did not advertise YUYV/MJPEG formats"
+    fi
+fi
+
+section "Host frame capture"
+if [[ -c "$NUEVO_CAMERA_DEVICE" ]]; then
+    capture_prefix=()
+    if [[ ! -r "$NUEVO_CAMERA_DEVICE" && "$EUID" -ne 0 ]]; then
+        info "$NUEVO_CAMERA_DEVICE is not readable by this shell; trying sudo for host capture"
+        capture_prefix=(sudo)
+    fi
+
+    if run_capture "$NUEVO_CAMERA_DEVICE" "$host_img" "${capture_prefix[@]}"; then
+        size="$(stat -c%s "$host_img" 2>/dev/null || echo 0)"
+        if [[ "$size" -gt 1000 ]]; then
+            pass "host loopback frame captured: $host_img (${size} bytes)"
+        else
+            fail "host loopback capture was too small (${size} bytes)"
+        fi
+    else
+        fail "could not capture a host frame from $NUEVO_CAMERA_DEVICE"
+    fi
+fi
+
+section "Docker device access"
+if command -v docker >/dev/null 2>&1; then
+    container_id="$(docker compose -f "$compose_file" ps -q ros2_runtime 2>/dev/null || true)"
+    if [[ -n "$container_id" ]]; then
+        pass "ros2_runtime container is running"
+        if docker compose -f "$compose_file" exec -T ros2_runtime test -c "$NUEVO_CAMERA_DEVICE" 2>/dev/null; then
+            pass "$NUEVO_CAMERA_DEVICE exists inside ros2_runtime"
+        else
+            fail "$NUEVO_CAMERA_DEVICE is not visible inside ros2_runtime; check docker-compose.rpi.yml device mappings"
+        fi
+
+        if docker compose -f "$compose_file" exec -T ros2_runtime bash -lc \
+            "timeout 8 ffmpeg -nostdin -y -loglevel error -f v4l2 -input_format yuyv422 -i '$NUEVO_CAMERA_DEVICE' -vframes 1 '$docker_tmp'"; then
+            if docker cp "${container_id}:${docker_tmp}" "$docker_img" 2>/dev/null; then
+                size="$(stat -c%s "$docker_img" 2>/dev/null || echo 0)"
+                if [[ "$size" -gt 1000 ]]; then
+                    pass "Docker loopback frame captured: $docker_img (${size} bytes)"
+                else
+                    fail "Docker loopback capture was too small (${size} bytes)"
+                fi
+            else
+                fail "captured inside Docker but could not copy $docker_tmp to host"
+            fi
+        else
+            fail "could not capture a frame from $NUEVO_CAMERA_DEVICE inside Docker"
+        fi
+    else
+        fail "ros2_runtime container is not running; start it with docker compose -f ros2_ws/docker/docker-compose.rpi.yml up -d"
+    fi
+else
+    fail "docker command is not installed or not on PATH"
+fi
+
+printf '\nResults: %d passed, %d failed\n' "$pass_count" "$fail_count"
+printf 'Images: %s\n' "$out_dir"
+
+if [[ "$fail_count" -eq 0 ]]; then
+    exit 0
+fi
+exit 1

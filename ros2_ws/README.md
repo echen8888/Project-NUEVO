@@ -172,7 +172,26 @@ The current bridge runtime expects:
 ```
 
 
-### 3. Build the Frontend Once
+### 3. Raspberry Pi Camera Setup
+
+If the Pi CSI camera is used, install the native Ubuntu camera service before
+starting the ROS2 container:
+
+```bash
+./ros2_ws/host_camera/install.sh
+```
+
+The installer creates a host-managed v4l2loopback camera at:
+
+```text
+/dev/video10
+```
+
+The ROS2 container mounts that virtual camera as a regular V4L2 device. Students
+should not need to install or debug `libcamera` inside Docker.
+
+
+### 4. Build the Frontend Once
 
 The bridge serves the built web UI. Build the frontend before starting the ROS
 container:
@@ -186,7 +205,7 @@ cp -r nuevo_ui/frontend/dist/. nuevo_ui/backend/static/
 ```
 
 
-### 4. Start the Container
+### 5. Start the Container
 
 From the repository root:
 
@@ -200,7 +219,25 @@ Wait until the log shows that `colcon build` finished and the container is
 ready.
 
 
-### 5. Enter the Running Container
+### 6. Camera Sanity Check
+
+If the Pi CSI camera is used, run this from the Raspberry Pi host after the ROS2
+container is running:
+
+```bash
+./ros2_ws/host_camera/check.sh
+```
+
+The check captures one frame on the host and one frame from inside the Docker
+container:
+
+```text
+/tmp/nuevo_camera_check/host_loopback.jpg
+/tmp/nuevo_camera_check/docker_loopback.jpg
+```
+
+
+### 7. Enter the Running Container
 
 Use the helper script:
 
@@ -230,7 +267,7 @@ cd /ros2_ws
 ```
 
 
-### 6. Sanity Check the Workspace
+### 8. Sanity Check the Workspace
 
 Inside the container:
 
@@ -247,7 +284,7 @@ Expected result:
 - the message and service definitions print correctly
 
 
-### 7. Start the Bridge Node First
+### 9. Start the Bridge Node First
 
 In the first container shell:
 
@@ -278,7 +315,7 @@ curl http://localhost:8000/health
 ```
 
 
-### 8. Start Other Nodes One by One
+### 10. Start Other Nodes One by One
 
 Example robot node:
 
