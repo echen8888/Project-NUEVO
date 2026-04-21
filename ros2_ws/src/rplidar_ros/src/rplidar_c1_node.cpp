@@ -296,6 +296,8 @@ private:
       get_logger(),
       "RPLIDAR scan active: mode=%s max_distance=%.1fm scan_frequency=%.1fHz bins_per_degree=%d",
       active_mode.scan_mode, range_max_m_, scan_frequency_hz_, angle_compensate_multiple_);
+    has_published_scan_ = false;
+    consecutive_scan_timeouts_ = 0;
     return true;
   }
 
@@ -311,7 +313,24 @@ private:
       const double scan_duration = (now() - start_time).seconds();
 
       if (result == SL_RESULT_OPERATION_TIMEOUT) {
-        RCLCPP_WARN(get_logger(), "Timed out waiting for a complete RPLIDAR scan");
+        ++consecutive_scan_timeouts_;
+        if (!has_published_scan_) {
+          if (consecutive_scan_timeouts_ == 1) {
+            RCLCPP_INFO(
+              get_logger(),
+              "RPLIDAR C1 is connected and waiting for the first complete scan.");
+          } else if (consecutive_scan_timeouts_ % 5 == 0) {
+            RCLCPP_WARN(
+              get_logger(),
+              "RPLIDAR C1 is still waiting for the first complete scan after %d consecutive timeouts.",
+              consecutive_scan_timeouts_);
+          }
+        } else if (consecutive_scan_timeouts_ == 3 || consecutive_scan_timeouts_ % 10 == 0) {
+          RCLCPP_WARN(
+            get_logger(),
+            "RPLIDAR scan timed out %d times in a row after scanning had already started. The device may have stopped responding.",
+            consecutive_scan_timeouts_);
+        }
         continue;
       }
 
@@ -327,6 +346,14 @@ private:
       }
 
       if (count > 1) {
+        if (!has_published_scan_ && consecutive_scan_timeouts_ > 0) {
+          RCLCPP_INFO(
+            get_logger(),
+            "RPLIDAR C1 received its first complete scan after %d startup timeout(s).",
+            consecutive_scan_timeouts_);
+        }
+        has_published_scan_ = true;
+        consecutive_scan_timeouts_ = 0;
         publish_scan(nodes.data(), count, start_time, scan_duration);
       }
     }
@@ -484,6 +511,8 @@ private:
   double reconnect_delay_s_;
   int scan_timeout_ms_;
   int angle_compensate_multiple_{1};
+  bool has_published_scan_{false};
+  int consecutive_scan_timeouts_{0};
 
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
   std::unique_ptr<sl::ILidarDriver> driver_;
