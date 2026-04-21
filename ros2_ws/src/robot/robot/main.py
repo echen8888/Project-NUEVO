@@ -26,6 +26,7 @@ import math
 # Robot build configuration
 # ---------------------------------------------------------------------------
 
+TAG_ID = 11 # set aruco tag ID 11 
 POSITION_UNIT = Unit.MM
 WHEEL_DIAMETER = 74.0
 WHEEL_BASE = 333.0
@@ -49,6 +50,7 @@ def configure_robot(robot: Robot) -> None:
         right_motor_id=RIGHT_WHEEL_MOTOR,
         right_motor_dir_inverted=RIGHT_WHEEL_DIR_INVERTED,
     )
+    robot.set_tracked_tag_id(TAG_ID) # set aruco tag ID as the tracked tag for localization
 
 
 def show_idle_leds(robot: Robot) -> None:
