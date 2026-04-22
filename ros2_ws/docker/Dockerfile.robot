@@ -49,6 +49,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         v4l-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# ── Ultralytics NCNN vision runtime ─────────────────────────────────────────
+# Keep this to the runtime packages. Do not install ultralytics[export] here:
+# that extra pulls large optional exporter backends that are not needed on the
+# robot.
+RUN pip3 install --no-cache-dir --break-system-packages \
+    ultralytics==8.4.41 \
+    ncnn
+
 # ── Initialize rosdep ─────────────────────────────────────────────────────────
 RUN rosdep init || true && rosdep update
 

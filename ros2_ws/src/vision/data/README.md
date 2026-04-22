@@ -1,19 +1,37 @@
 # Vision Model Data
 
-Put the YOLO weights file here:
+The default ROS vision node model is an exported Ultralytics YOLO26n NCNN
+model:
 
 ```text
-ros2_ws/src/vision/data/yolov4.weights
+ros2_ws/src/vision/data/yolo26n_ncnn_imgsz_640/
 ```
 
-The weights file is intentionally not tracked by Git. Students should copy or upload their local model weights to this path before running the vision node.
+It was exported with image size 640 and is tracked in Git because the NCNN
+runtime files are small enough for this project.
 
-Tracked files in this directory:
+Default detection classes:
 
-- `yolov4.cfg`
-- `obj.names`
+- `traffic light`
+- `stop sign`
+- `person`
 
-Ignored local model files:
+To try another Ultralytics model, place the exported model folder under this
+directory and launch the node with:
+
+```bash
+ros2 run vision vision_node --ros-args \
+  -p model_path:=/ros2_ws/src/vision/data/<model_folder> \
+  -p model_imgsz:=640
+```
+
+For all COCO classes, pass an empty class filter:
+
+```bash
+ros2 run vision vision_node --ros-args -p class_filter:=""
+```
+
+Ignored local model files remain useful for experiments:
 
 - `*.weights`
 - `*.pt`
