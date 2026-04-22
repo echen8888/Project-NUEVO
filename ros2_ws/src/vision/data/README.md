@@ -10,14 +10,18 @@ ros2_ws/src/vision/data/yolo26n_ncnn_imgsz_640/
 It was exported with image size 640 and is tracked in Git because the NCNN
 runtime files are small enough for this project.
 
+The ROS runtime loads `model.ncnn.param`, `model.ncnn.bin`, and
+`metadata.yaml` directly with the `ncnn` Python package. It does not install or
+import the Ultralytics Python package.
+
 Default detection classes:
 
 - `traffic light`
 - `stop sign`
 - `person`
 
-To try another Ultralytics model, place the exported model folder under this
-directory and launch the node with:
+To try another Ultralytics model, export it to NCNN outside the ROS runtime,
+place the exported model folder under this directory, and launch the node with:
 
 ```bash
 ros2 run vision vision_node --ros-args \

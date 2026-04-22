@@ -1,7 +1,8 @@
 # Vision Node Plan
 
 The ROS vision node uses an exported Ultralytics YOLO26n NCNN model. The old
-Darknet/YOLOv4 path is removed.
+Darknet/YOLOv4 path is removed, and the ROS runtime loads NCNN directly
+without importing Ultralytics or Torch.
 
 ## Runtime Model
 
@@ -16,7 +17,7 @@ runtime files are small enough for the project repository.
 
 Default runtime parameters:
 
-- `model_path`: exported Ultralytics model directory
+- `model_path`: exported NCNN model directory
 - `model_imgsz`: `640`
 - `class_filter`: `traffic light,stop sign,person`
 - `confidence_threshold`: `0.35`
@@ -72,7 +73,8 @@ detection.add_attribute("name", "value", score)
 
 ## Trying Another Ultralytics Model
 
-Export the model outside the ROS node, then put the exported folder under:
+Export the model to NCNN outside the ROS node, then put the exported folder
+under:
 
 ```text
 ros2_ws/src/vision/data/

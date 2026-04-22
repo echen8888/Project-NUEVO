@@ -1,65 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 import time
-from typing import Any
 
 from ament_index_python.packages import get_package_share_directory
 from bridge_interfaces.msg import VisionDetection, VisionDetectionArray
-import cv2
 import rclpy
 from rclpy.node import Node
 
+from vision.camera_utils import ManagedCamera
+from vision.model_utils import (
+    DetectionRecord,
+    YoloNcnnDetector,
+    default_model_path,
+    resolve_model_path,
+)
+from vision.timing_utils import FixedRateScheduler
 from vision.traffic_light import classify_traffic_light_color
-
-try:
-    from ultralytics import YOLO
-except ImportError:  # pragma: no cover - handled at runtime with a clearer error
-    YOLO = None
-
-
-DEFAULT_MODEL_DIR = "yolo26n_ncnn_imgsz_640"
-
-
-def _clamp_box(
-    x: int,
-    y: int,
-    w: int,
-    h: int,
-    image_width: int,
-    image_height: int,
-) -> tuple[int, int, int, int] | None:
-    x0 = max(0, x)
-    y0 = max(0, y)
-    x1 = min(image_width, x + w)
-    y1 = min(image_height, y + h)
-    width = x1 - x0
-    height = y1 - y0
-    if width <= 0 or height <= 0:
-        return None
-    return x0, y0, width, height
-
-
-@dataclass
-class DetectionAttribute:
-    name: str
-    value: str
-    score: float
-
-
-@dataclass
-class DetectionRecord:
-    class_name: str
-    confidence: float
-    x: int
-    y: int
-    width: int
-    height: int
-    attributes: list[DetectionAttribute] = field(default_factory=list)
-
-    def add_attribute(self, name: str, value: str, score: float) -> None:
-        self.attributes.append(DetectionAttribute(name=name, value=value, score=float(score)))
 
 
 class VisionNode(Node):
@@ -68,14 +25,14 @@ class VisionNode(Node):
 
         self._share_data_dir = Path(get_package_share_directory("vision")) / "data"
         self._source_data_dir = Path("/ros2_ws/src/vision/data")
-        default_model_path = self._default_model_path()
+        model_default = default_model_path(self._source_data_dir, self._share_data_dir)
 
         self.declare_parameter("camera_device", "/dev/video10")
         self.declare_parameter("camera_width", 640)
         self.declare_parameter("camera_height", 480)
         self.declare_parameter("camera_fps", 5.0)
         self.declare_parameter("process_rate_hz", 5.0)
-        self.declare_parameter("model_path", str(default_model_path))
+        self.declare_parameter("model_path", str(model_default))
         self.declare_parameter("model_imgsz", 640)
         self.declare_parameter("confidence_threshold", 0.35)
         self.declare_parameter("iou_threshold", 0.7)
@@ -98,185 +55,43 @@ class VisionNode(Node):
         self._log_interval_sec = max(1.0, float(self.get_parameter("log_interval_sec").value))
 
         self._publisher = self.create_publisher(VisionDetectionArray, "/vision/detections", 10)
-        self._capture: cv2.VideoCapture | None = None
-        self._camera_connected = False
+        self._camera = ManagedCamera(
+            device=self._camera_device,
+            width=self._camera_width,
+            height=self._camera_height,
+            fps=self._camera_fps,
+            reconnect_delay_sec=self._reconnect_delay_sec,
+            log_interval_sec=self._log_interval_sec,
+            logger=self.get_logger(),
+        )
         self._last_loop_summary = 0.0
 
-        model_path = self._resolve_model_path(str(self.get_parameter("model_path").value))
-        self._model = self._load_model(model_path)
-        self._model_names = self._load_model_names(self._model)
-        self._class_filter_ids = self._resolve_class_filter(self._class_filter)
+        model_path = resolve_model_path(
+            raw_path=str(self.get_parameter("model_path").value),
+            source_data_dir=self._source_data_dir,
+            share_data_dir=self._share_data_dir,
+        )
+        self._detector = YoloNcnnDetector(
+            model_path=model_path,
+            input_size=self._model_imgsz,
+            confidence_threshold=self._confidence_threshold,
+            iou_threshold=self._iou_threshold,
+            max_detections=self._max_detections,
+            class_filter=self._class_filter,
+        )
 
         self.get_logger().info(
-            "Loaded Ultralytics model path=%s imgsz=%d classes=%d filter=%s"
+            "Loaded NCNN YOLO model path=%s imgsz=%d classes=%d filter=%s"
             % (
                 model_path,
                 self._model_imgsz,
-                len(self._model_names),
+                self._detector.class_count,
                 self._class_filter or "all",
             )
         )
 
-    def _default_model_path(self) -> Path:
-        source_model_path = self._source_data_dir / DEFAULT_MODEL_DIR
-        if source_model_path.is_dir():
-            return source_model_path
-        return self._share_data_dir / DEFAULT_MODEL_DIR
-
-    def _resolve_model_path(self, raw_path: str) -> str:
-        raw_path = raw_path.strip()
-        if not raw_path:
-            raise ValueError("model_path cannot be empty")
-
-        path = Path(raw_path).expanduser()
-        if path.is_absolute():
-            if not path.exists():
-                raise FileNotFoundError(f"Ultralytics model path not found: {path}")
-            return str(path)
-
-        candidates = [
-            Path.cwd() / path,
-            self._source_data_dir / path,
-            self._share_data_dir / path,
-        ]
-        for candidate in candidates:
-            if candidate.exists():
-                return str(candidate)
-
-        # Allow explicit Ultralytics model names such as yolo26n.pt for quick
-        # experiments. Classroom deployment should use a checked-in/exported
-        # model directory so startup never depends on network access.
-        if "/" not in raw_path and "\\" not in raw_path:
-            return raw_path
-
-        raise FileNotFoundError(
-            "Ultralytics model path not found: %s. Put exported models under "
-            "ros2_ws/src/vision/data or pass model_path:=/absolute/path." % raw_path
-        )
-
-    def _load_model(self, model_path: str) -> Any:
-        if YOLO is None:
-            raise RuntimeError(
-                "The vision node requires the 'ultralytics' Python package. "
-                "Install the project Docker image or run: pip install ultralytics==8.4.41 ncnn"
-            )
-        return YOLO(model_path)
-
-    def _load_model_names(self, model: Any) -> dict[int, str]:
-        names = model.names
-        if isinstance(names, dict):
-            return {int(index): str(name) for index, name in names.items()}
-        return {int(index): str(name) for index, name in enumerate(names)}
-
-    def _resolve_class_filter(self, raw_filter: str) -> list[int] | None:
-        requested = {name.strip().lower() for name in raw_filter.split(",") if name.strip()}
-        if not requested:
-            return None
-
-        indexes = [
-            index
-            for index, name in self._model_names.items()
-            if name.strip().lower() in requested
-        ]
-        available = {self._model_names[index].strip().lower() for index in indexes}
-        missing = sorted(requested - available)
-        if missing:
-            self.get_logger().warn(
-                "Vision class_filter entries not found in model: %s"
-                % ", ".join(missing)
-            )
-        return indexes
-
-    def _release_camera(self) -> None:
-        if self._capture is not None:
-            self._capture.release()
-            self._capture = None
-        if self._camera_connected:
-            self._camera_connected = False
-            self.get_logger().warn("Vision camera disconnected; waiting for %s" % self._camera_device)
-
-    def _ensure_camera(self) -> bool:
-        if self._capture is not None and self._capture.isOpened():
-            return True
-
-        self._release_camera()
-        capture = cv2.VideoCapture(self._camera_device, cv2.CAP_V4L2)
-        if not capture.isOpened():
-            self.get_logger().warn(
-                "Waiting for camera device %s"
-                % self._camera_device,
-                throttle_duration_sec=self._log_interval_sec,
-            )
-            capture.release()
-            time.sleep(self._reconnect_delay_sec)
-            return False
-
-        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        if self._camera_width > 0:
-            capture.set(cv2.CAP_PROP_FRAME_WIDTH, float(self._camera_width))
-        if self._camera_height > 0:
-            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, float(self._camera_height))
-        if self._camera_fps > 0.0:
-            capture.set(cv2.CAP_PROP_FPS, self._camera_fps)
-
-        self._capture = capture
-        self._camera_connected = True
-        self.get_logger().info(
-            "Connected vision camera %s at requested %dx%d @ %.1f fps"
-            % (self._camera_device, self._camera_width, self._camera_height, self._camera_fps)
-        )
-        return True
-
     def _infer(self, frame) -> list[DetectionRecord]:
-        result = self._model.predict(
-            frame,
-            imgsz=self._model_imgsz,
-            conf=self._confidence_threshold,
-            iou=self._iou_threshold,
-            classes=self._class_filter_ids,
-            max_det=self._max_detections,
-            verbose=False,
-        )[0]
-        return self._decode_detections(result, frame.shape[1], frame.shape[0])
-
-    def _decode_detections(
-        self,
-        result: Any,
-        image_width: int,
-        image_height: int,
-    ) -> list[DetectionRecord]:
-        records: list[DetectionRecord] = []
-        boxes = result.boxes
-        if boxes is None:
-            return records
-
-        for box in boxes:
-            class_id = int(box.cls.item())
-            confidence = float(box.conf.item())
-            x1, y1, x2, y2 = [int(round(value)) for value in box.xyxy[0].tolist()]
-            clamped = _clamp_box(
-                x=x1,
-                y=y1,
-                w=x2 - x1,
-                h=y2 - y1,
-                image_width=image_width,
-                image_height=image_height,
-            )
-            if clamped is None:
-                continue
-
-            x, y, width, height = clamped
-            records.append(
-                DetectionRecord(
-                    class_name=self._model_names.get(class_id, f"class_{class_id}"),
-                    confidence=confidence,
-                    x=x,
-                    y=y,
-                    width=width,
-                    height=height,
-                )
-            )
-        return records
+        return self._detector.predict(frame)
 
     def _build_detection_msg(self, record: DetectionRecord) -> VisionDetection:
         detection = VisionDetection()
@@ -309,30 +124,20 @@ class VisionNode(Node):
         return message
 
     def run(self) -> None:
-        period = 1.0 / self._process_rate_hz if self._process_rate_hz > 0.0 else 0.0
-        next_cycle = time.monotonic()
+        scheduler = FixedRateScheduler(self._process_rate_hz)
 
         while rclpy.ok():
             rclpy.spin_once(self, timeout_sec=0.0)
-            if not self._ensure_camera():
-                next_cycle = time.monotonic()
+            if not self._camera.ensure():
+                scheduler.reset()
                 continue
 
-            if period > 0.0:
-                sleep_time = next_cycle - time.monotonic()
-                if sleep_time > 0.0:
-                    time.sleep(sleep_time)
+            scheduler.wait_until_ready()
 
-            ok, frame = self._capture.read()
+            ok, frame = self._camera.read()
             if not ok or frame is None:
-                self.get_logger().warn(
-                    "Failed to read a frame from %s; reconnecting"
-                    % self._camera_device,
-                    throttle_duration_sec=self._log_interval_sec,
-                )
-                self._release_camera()
-                time.sleep(self._reconnect_delay_sec)
-                next_cycle = time.monotonic()
+                self._camera.handle_read_failure()
+                scheduler.reset()
                 continue
 
             capture_stamp = self.get_clock().now().to_msg()
@@ -389,12 +194,9 @@ class VisionNode(Node):
                     )
                 )
 
-            if period > 0.0:
-                next_cycle += period
-                if next_cycle < time.monotonic():
-                    next_cycle = time.monotonic()
+            scheduler.schedule_next()
 
-        self._release_camera()
+        self._camera.release()
 
 
 def main(args=None) -> None:

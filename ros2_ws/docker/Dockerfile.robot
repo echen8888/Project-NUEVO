@@ -49,13 +49,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         v4l-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Ultralytics NCNN vision runtime ─────────────────────────────────────────
-# Keep this to the runtime packages. Do not install ultralytics[export] here:
-# that extra pulls large optional exporter backends that are not needed on the
-# robot.
-RUN pip3 install --no-cache-dir --break-system-packages \
-    ultralytics==8.4.41 \
-    ncnn
+# ── NCNN vision runtime ─────────────────────────────────────────────────────
+# Ultralytics is only used outside the robot runtime to export model folders.
+# The container loads model.ncnn.param/bin directly, avoiding torch/torchvision.
+RUN pip3 install --no-cache-dir --break-system-packages --no-deps \
+    ncnn==1.0.20260114
 
 # ── Initialize rosdep ─────────────────────────────────────────────────────────
 RUN rosdep init || true && rosdep update
