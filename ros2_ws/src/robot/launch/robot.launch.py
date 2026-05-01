@@ -24,12 +24,6 @@ def generate_launch_description():
             default_value="true",
             description="Launch the robot_gps node alongside the robot node.",
         ),
-        Node(
-            package="bridge",
-            executable="bridge",
-            name="bridge",
-            output="screen",
-        ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 PathJoinSubstitution(
