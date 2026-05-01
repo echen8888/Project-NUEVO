@@ -9,6 +9,9 @@ set(msg_files
   # Global GPS / field localizer
   "msg/TagDetection.msg"
   "msg/TagDetectionArray.msg"
+  # Fused localisation and lidar output
+  "msg/FusedPose.msg"
+  "msg/LidarWorldPoints.msg"
   # Vision detections
   "msg/VisionDetection.msg"
   "msg/VisionDetectionArray.msg"
