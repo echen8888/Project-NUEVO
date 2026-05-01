@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import time
 import threading
 from queue import Empty, SimpleQueue
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 from bridge_interfaces.msg import (
     DCEnable,
@@ -17,10 +20,12 @@ from bridge_interfaces.msg import (
     DCSetPwm,
     DCSetVelocity,
     DCStateAll,
+    FusedPose,
     IOInputState,
     IOOutputState,
     IOSetLed,
     IOSetNeopixel,
+    LidarWorldPoints,
     SensorImu,
     SensorKinematics,
     SensorMagCalCmd,
@@ -46,6 +51,7 @@ from bridge_interfaces.msg import (
     SystemInfo,
     SystemPower,
     SystemState,
+    TagDetectionArray,
 )
 from bridge_interfaces.srv import SetFirmwareState
 
@@ -60,6 +66,16 @@ class BridgeNode(Node):
         self._firmware_state_transitions = FirmwareStateTransitionCoordinator()
         self._decoded_queue: SimpleQueue[dict] = SimpleQueue()
         qos = 10
+
+        # Capture asyncio event loop so we can broadcast from the ROS spin thread.
+        try:
+            self._loop = asyncio.get_event_loop()
+        except RuntimeError:
+            self._loop = None
+
+        # GPS staleness tracking for tag_detections → gps_status relay.
+        self._last_tag_time: float = 0.0
+        self._last_tag_data: dict = {"is_detected": False, "tag_id": 0, "x": 0.0, "y": 0.0}
 
         self._handlers = {
             "sys_state": (self.create_publisher(SystemState, "/sys_state", qos), conv.to_system_state),
@@ -105,6 +121,19 @@ class BridgeNode(Node):
         self.create_subscription(IOSetNeopixel, "/io_set_neopixel", self._on_io_set_neopixel, qos)
         self.create_service(SetFirmwareState, "/set_firmware_state", self._on_set_firmware_state)
         self.create_timer(0.005, self._drain_decoded_queue)
+
+        # ── RPi sensor relay subscriptions ────────────────────────────────────
+        best_effort = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self.create_subscription(FusedPose,         '/fused_pose',         self._on_fused_pose,     best_effort)
+        self.create_subscription(LidarWorldPoints,  '/lidar_world_points', self._on_lidar_world,    best_effort)
+        self.create_subscription(TagDetectionArray, '/tag_detections',     self._on_tag_detections, 10)
+
+        # ROS node introspection at ~1.5 Hz
+        self.create_timer(1.0 / 1.5, self._publish_ros_nodes)
 
     def publish_decoded(self, msg_dict: dict) -> None:
         self._decoded_queue.put(msg_dict)
@@ -279,6 +308,100 @@ class BridgeNode(Node):
         response.error_flags = int(result.error_flags)
         response.message = result.message
         return response
+
+    # ── Thread-safe WebSocket broadcast ──────────────────────────────────────
+
+    def _ws_broadcast(self, message: dict) -> None:
+        """Broadcast a dict to all WebSocket clients from any thread."""
+        if self._loop is None or not self._loop.is_running():
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._runtime.ws_manager.broadcast(message),
+            self._loop,
+        )
+
+    # ── RPi sensor relay callbacks ────────────────────────────────────────────
+
+    def _on_fused_pose(self, msg: FusedPose) -> None:
+        self._ws_broadcast({
+            "topic": "fused_pose",
+            "data": {
+                "x":          float(msg.x),
+                "y":          float(msg.y),
+                "theta":      float(msg.theta),
+                "gps_active": bool(msg.gps_active),
+            },
+            "ts": time.time(),
+        })
+
+    def _on_lidar_world(self, msg: LidarWorldPoints) -> None:
+        self._ws_broadcast({
+            "topic": "lidar_world_points",
+            "data": {
+                "xs":          list(msg.xs),
+                "ys":          list(msg.ys),
+                "robot_x":     float(msg.robot_x),
+                "robot_y":     float(msg.robot_y),
+                "robot_theta": float(msg.robot_theta),
+            },
+            "ts": time.time(),
+        })
+
+    def _on_tag_detections(self, msg: TagDetectionArray) -> None:
+        now = time.time()
+        self._last_tag_time = now
+        if msg.detections:
+            det = msg.detections[0]
+            self._last_tag_data = {
+                "is_detected": True,
+                "tag_id": int(det.tag_id),
+                "x": float(det.x) * 1000.0,  # metres → mm
+                "y": float(det.y) * 1000.0,
+            }
+        self._ws_broadcast({
+            "topic": "gps_status",
+            "data": {**self._last_tag_data, "is_detected": True},
+            "ts": now,
+        })
+
+    def _publish_ros_nodes(self) -> None:
+        """Introspect running ROS nodes and broadcast the list at ~1.5 Hz."""
+        now = time.time()
+        # Mark GPS as stale if no detection in the last 1.0 s
+        if self._last_tag_data.get("is_detected") and (now - self._last_tag_time) > 1.0:
+            self._last_tag_data["is_detected"] = False
+            self._ws_broadcast({
+                "topic": "gps_status",
+                "data": self._last_tag_data,
+                "ts": now,
+            })
+
+        try:
+            node_names = self.get_node_names_and_namespaces()
+        except Exception:
+            return
+
+        nodes = []
+        for name, ns in node_names:
+            full = f"{ns}/{name}".replace("//", "/")
+            try:
+                pubs = [
+                    t
+                    for t, _ in self.get_publisher_names_and_types_by_node(name, ns)
+                ]
+                subs = [
+                    t
+                    for t, _ in self.get_subscriber_names_and_types_by_node(name, ns)
+                ]
+            except Exception:
+                pubs, subs = [], []
+            nodes.append({"name": full, "publishers": pubs, "subscribers": subs})
+
+        self._ws_broadcast({
+            "topic": "ros_nodes",
+            "data": {"nodes": nodes},
+            "ts": now,
+        })
 
     def spin_in_thread(self) -> threading.Thread:
         thread = threading.Thread(
