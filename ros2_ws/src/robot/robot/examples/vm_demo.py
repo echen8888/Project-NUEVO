@@ -20,7 +20,7 @@ import random
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from bridge_interfaces.msg import FusedPose, LidarWorldPoints, TagDetectionArray, TagDetection
+from bridge_interfaces.msg import FusedPose, LidarWorldPoints, SensorKinematics, TagDetectionArray, TagDetection
 
 # ── Tune these ────────────────────────────────────────────────────────────────
 CIRCLE_RADIUS_MM   = 600.0   # robot orbit radius
@@ -30,10 +30,13 @@ LIDAR_RAYS         = 60      # number of fake lidar rays
 PUBLISH_HZ         = 10      # update rate
 
 GPS_TAG_ID         = 7       # fake ArUco tag ID
-GPS_TAG_X_M        = 0.0     # tag position in metres (world frame)
-GPS_TAG_Y_M        = 0.0
+GPS_RADIUS_MM      = 900.0   # GPS tag orbit radius (larger than robot)
+GPS_PERIOD_S       = 35.0    # seconds per GPS orbit lap (different speed)
 GPS_VISIBLE_S      = 3.0     # seconds tag is "detected" per cycle
 GPS_HIDDEN_S       = 2.0     # seconds tag is "lost" per cycle
+
+# Odometry drift — simulates wheel encoder accumulation error relative to fused pose.
+ODOM_DRIFT_PER_LAP_MM = 150.0   # extra radius added per full lap (spiral outward)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -47,6 +50,7 @@ class VMDemo(Node):
         )
         self._pose_pub  = self.create_publisher(FusedPose,          '/fused_pose',         best_effort)
         self._lidar_pub = self.create_publisher(LidarWorldPoints,   '/lidar_world_points', best_effort)
+        self._odom_pub  = self.create_publisher(SensorKinematics,   '/odometry',           best_effort)
         self._gps_pub   = self.create_publisher(TagDetectionArray,  '/tag_detections',     10)
 
         self._t = 0.0
@@ -79,17 +83,33 @@ class VMDemo(Node):
         fp.gps_active = gps_visible
         self._pose_pub.publish(fp)
 
+        # ── Odometry (drifts outward by ODOM_DRIFT_PER_LAP_MM per lap) ───────
+        laps = self._t / CIRCLE_PERIOD_S
+        odom_r = CIRCLE_RADIUS_MM + laps * ODOM_DRIFT_PER_LAP_MM
+        ox_pos = odom_r * math.cos(phase)
+        oy_pos = odom_r * math.sin(phase)
+        sk = SensorKinematics()
+        sk.header.stamp = fp.header.stamp
+        sk.x     = float(ox_pos)
+        sk.y     = float(oy_pos)
+        sk.theta = float(rtheta)
+        sk.vx    = 0.0
+        sk.vy    = 0.0
+        sk.v_theta = 0.0
+        self._odom_pub.publish(sk)
+
         # ── Fake GPS tag detection ────────────────────────────────────────────
-        # Publish non-empty array when visible, empty array when hidden.
-        # The bridge ignores empty arrays (no staleness-timer reset), so the
-        # GPS card will flip to NO after its 1 s timeout.
+        gps_phase = (self._t / GPS_PERIOD_S) * 2.0 * math.pi
+        gps_x_m = (GPS_RADIUS_MM * math.cos(gps_phase)) / 1000.0
+        gps_y_m = (GPS_RADIUS_MM * math.sin(gps_phase)) / 1000.0
+
         arr = TagDetectionArray()
         arr.header.stamp = fp.header.stamp
         if gps_visible:
             det = TagDetection()
             det.tag_id = GPS_TAG_ID
-            det.x      = GPS_TAG_X_M
-            det.y      = GPS_TAG_Y_M
+            det.x      = gps_x_m
+            det.y      = gps_y_m
             det.theta  = 0.0
             arr.detections = [det]
         else:

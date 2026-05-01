@@ -222,7 +222,7 @@ function Dashboard() {
 
         {/* Footer */}
         <footer className="mt-8 pb-24 text-center text-white/30 text-xs space-y-1">
-          <p>NUEVO UI · MAE 162 · UCLA · 2026</p>
+          <p>NUEVO UI 0.5.5· MAE 162 · UCLA · 2026</p>
         </footer>
       </div>
 

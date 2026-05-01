@@ -262,7 +262,7 @@ const MAX_TRAIL_PTS = 5000
 
 // Lidar rolling window — how many consecutive frames to overlay on the canvas.
 // Increase to fill in gaps when the scanner misses angles; decrease for less lag.
-export const LIDAR_WINDOW_FRAMES = 5
+export const LIDAR_WINDOW_FRAMES = 3
 
 interface RobotState {
   connected: boolean

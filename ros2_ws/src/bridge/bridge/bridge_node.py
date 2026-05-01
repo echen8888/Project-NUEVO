@@ -131,6 +131,9 @@ class BridgeNode(Node):
         self.create_subscription(FusedPose,         '/fused_pose',         self._on_fused_pose,     best_effort)
         self.create_subscription(LidarWorldPoints,  '/lidar_world_points', self._on_lidar_world,    best_effort)
         self.create_subscription(TagDetectionArray, '/tag_detections',     self._on_tag_detections, 10)
+        # Raw odometry relay — used by vm_demo and future nav_msgs sources.
+        # Broadcasts as sensor_kinematics so the store odometryTrail populates.
+        self.create_subscription(SensorKinematics, '/odometry', self._on_odometry, best_effort)
 
         # ROS node introspection at ~1.5 Hz
         self.create_timer(1.0 / 1.5, self._publish_ros_nodes)
@@ -343,6 +346,21 @@ class BridgeNode(Node):
                 "robot_x":     float(msg.robot_x),
                 "robot_y":     float(msg.robot_y),
                 "robot_theta": float(msg.robot_theta),
+            },
+            "ts": time.time(),
+        })
+
+    def _on_odometry(self, msg: SensorKinematics) -> None:
+        self._ws_broadcast({
+            "topic": "sensor_kinematics",
+            "data": {
+                "x":       float(msg.x),
+                "y":       float(msg.y),
+                "theta":   float(msg.theta),
+                "vx":      float(msg.vx),
+                "vy":      float(msg.vy),
+                "vTheta":  float(msg.v_theta),
+                "timestamp": 0,
             },
             "ts": time.time(),
         })

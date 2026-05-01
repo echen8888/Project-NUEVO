@@ -12,8 +12,8 @@ const PAD_MM = 200
 interface Trails { odom: boolean; gps: boolean; fused: boolean; lidar: boolean }
 
 const SERIES = [
-  { key: 'odom'  as const, label: 'Odometry', color: '#22d3ee' },
-  { key: 'fused' as const, label: 'Fused',    color: '#4ade80' },
+  { key: 'odom'  as const, label: 'Odometry', color: '#4ade80' },
+  { key: 'fused' as const, label: 'Fused',    color: '#60a5fa' },
   { key: 'gps'   as const, label: 'GPS',      color: '#facc15' },
   { key: 'lidar' as const, label: 'Lidar',    color: '#f87171' },
 ]
@@ -116,10 +116,10 @@ export function WorldCanvas() {
     ctx.textBaseline = 'bottom'
     ctx.fillText(`grid: ${gridLabel}`, W - 4, H - 3)
 
-    // Odometry trail (cyan)
+    // Odometry trail (green)
     if (trails.odom && odomTrail.length > 1) {
       ctx.beginPath()
-      ctx.strokeStyle = 'rgba(34,211,238,0.55)'
+      ctx.strokeStyle = 'rgba(74,222,128,0.55)'
       ctx.lineWidth = 1.5
       ctx.lineJoin = 'round'
       odomTrail.forEach(([wx, wy], i) => {
@@ -129,10 +129,10 @@ export function WorldCanvas() {
       ctx.stroke()
     }
 
-    // Fused trail (green)
+    // Fused trail (blue)
     if (trails.fused && fusedTrail.length > 1) {
       ctx.beginPath()
-      ctx.strokeStyle = 'rgba(74,222,128,0.70)'
+      ctx.strokeStyle = 'rgba(96,165,250,0.70)'
       ctx.lineWidth = 1.5
       ctx.lineJoin = 'round'
       fusedTrail.forEach(([wx, wy], i) => {
@@ -142,13 +142,14 @@ export function WorldCanvas() {
       ctx.stroke()
     }
 
-    // GPS dot (yellow)
+    // GPS cross (yellow)
     if (trails.gps && gpsStatus?.is_detected) {
       const [cx, cy] = toC(gpsStatus.x, gpsStatus.y)
-      ctx.beginPath()
-      ctx.arc(cx, cy, 4, 0, Math.PI * 2)
-      ctx.fillStyle = 'rgba(250,204,21,0.90)'
-      ctx.fill()
+      const arm = 6
+      ctx.strokeStyle = 'rgba(250,204,21,0.90)'
+      ctx.lineWidth = 2
+      ctx.beginPath(); ctx.moveTo(cx - arm, cy); ctx.lineTo(cx + arm, cy); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(cx, cy - arm); ctx.lineTo(cx, cy + arm); ctx.stroke()
     }
 
     // Lidar cloud — all frames in the rolling window, oldest most transparent
