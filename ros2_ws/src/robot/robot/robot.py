@@ -73,7 +73,16 @@ except (ImportError, ModuleNotFoundError):
         image_width = 0
         image_height = 0
 from bridge_interfaces.srv import SetFirmwareState
-from sensor_msgs.msg import LaserScan
+try:
+    from sensor_msgs.msg import LaserScan
+except (ImportError, ModuleNotFoundError):
+    class LaserScan:  # test-stub fallback
+        ranges = ()
+        angle_min = 0.0
+        angle_max = 0.0
+        angle_increment = 0.0
+        range_min = 0.0
+        range_max = 0.0
 
 from robot.hardware_map import (
     BUTTON_COUNT,
