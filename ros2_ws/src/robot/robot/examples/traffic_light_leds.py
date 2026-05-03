@@ -53,6 +53,7 @@ MIN_TRAFFIC_LIGHT_CONFIDENCE = 0.50
 
 def configure_robot(robot: Robot) -> None:
     robot.set_unit(POSITION_UNIT)
+    robot.enable_vision()
 
 
 def start_robot(robot: Robot) -> None:

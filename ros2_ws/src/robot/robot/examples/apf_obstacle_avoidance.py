@@ -1,94 +1,65 @@
 """
-apf_obstacle_avoidance.py — APF obstacle avoidance with lidar
-=============================================================
-Uses artificial potential fields (APF) to steer the robot toward a sequence
-of waypoints while repelling it from lidar-detected obstacles.
+apf_obstacle_avoidance.py — APF path following with lidar
+=========================================================
+Artificial potential fields (APF) path following using the current `main.py`
+style FSM loop.
 
-LIDAR IS REQUIRED.  GPS fusion is optional (ENABLE_GPS flag).
+HOW TO RUN
+----------
+Copy this file over main.py, then restart the robot node:
 
-HOW TO RUN:
     cp examples/apf_obstacle_avoidance.py main.py
     ros2 run robot robot
 
-    Make sure the lidar node is running:
-        ros2 run sensors lidar_node
+Lidar must already be publishing `/scan`. One standard bring-up is:
 
-SENSOR TOGGLES:
-    ENABLE_GPS = False  →  True   requires camera node + ArUco tag TAG_ID
+    ros2 launch rplidar_ros rplidar_c1.launch.py
 
-HOW APF WORKS:
-    Attractive force  — pulls the robot toward the next waypoint.
-    Repulsive force   — pushes the robot away from any obstacle closer than
-                        REPULSION_RANGE_MM.
-    The planner sums both force vectors each tick and converts the result
-    into a (linear, angular) velocity command.
+Press BTN_1 to start the path. BTN_2 cancels the active run.
 
-TUNING TIPS:
-    REPULSION_RANGE_MM   — increase if the robot clips obstacles; decrease to
-                           allow it to pass closer.
-    REPULSION_GAIN       — increase for more aggressive avoidance; if the
-                           robot oscillates or stalls, reduce this value.
-    VELOCITY_MM_S        — slower speeds give APF more time to react.
-
-WHAT THIS TEACHES:
-    1. APF path following with apf_follow_path()
-    2. Lidar is enabled once and obstacles are automatically available
-    3. How to read live obstacle count during motion
-    4. Optional GPS fusion for improved position accuracy
+WHAT THIS TEACHES
+-----------------
+1. `enable_lidar()` and optional `enable_gps()` setup
+2. Non-blocking `apf_follow_path()` inside an FSM loop
+3. Periodic status printing while motion is active
+4. Clean cancel / rerun handling with a `MotionHandle`
 """
 
 from __future__ import annotations
 
 import time
 
-from robot.hardware_map import LED, Motor
+from robot.hardware_map import Button, DEFAULT_FSM_HZ, LED, Motor
 from robot.robot import FirmwareState, Robot, Unit
 
 
-# ---------------------------------------------------------------------------
-# Sensor toggles
-# ---------------------------------------------------------------------------
+ENABLE_GPS = False
+TAG_ID = 11
 
-ENABLE_GPS = False   # set True if camera node + ArUco tag TAG_ID is visible
-
-TAG_ID = 11          # ArUco tag ID for GPS fusion (only used when ENABLE_GPS = True)
-
-
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
-POSITION_UNIT    = Unit.MM
-WHEEL_DIAMETER   = 74.0    # mm
-WHEEL_BASE       = 333.0   # mm
+POSITION_UNIT = Unit.MM
+WHEEL_DIAMETER = 74.0
+WHEEL_BASE = 333.0
 INITIAL_THETA_DEG = 90.0
 
-LEFT_WHEEL_MOTOR          = Motor.DC_M1
-LEFT_WHEEL_DIR_INVERTED   = False
-RIGHT_WHEEL_MOTOR         = Motor.DC_M2
-RIGHT_WHEEL_DIR_INVERTED  = True
+LEFT_WHEEL_MOTOR = Motor.DC_M1
+LEFT_WHEEL_DIR_INVERTED = False
+RIGHT_WHEEL_MOTOR = Motor.DC_M2
+RIGHT_WHEEL_DIR_INVERTED = True
 
-# Path — (x_mm, y_mm) waypoints.  Place obstacles somewhere between them.
 WAYPOINTS_MM = [
-    (1000.0,    0.0),
-    (2000.0,    0.0),
+    (1000.0, 0.0),
+    (2000.0, 0.0),
 ]
 
-VELOCITY_MM_S      = 150.0   # forward speed (slower = more reaction time for APF)
-LOOKAHEAD_MM       = 250.0   # lookahead for the attractive component
-TOLERANCE_MM       =  50.0   # waypoint goal tolerance
-MAX_ANGULAR_RAD_S  =   1.2   # angular-rate clamp
-
-# APF repulsion parameters
-REPULSION_RANGE_MM = 400.0   # obstacles within this radius cause repulsion (mm)
-REPULSION_GAIN     = 800.0   # repulsive force magnitude — tune for your environment
+VELOCITY_MM_S = 150.0
+LOOKAHEAD_MM = 250.0
+TOLERANCE_MM = 50.0
+MAX_ANGULAR_RAD_S = 1.2
+REPULSION_RANGE_MM = 400.0
+REPULSION_GAIN = 800.0
 
 STATUS_PRINT_INTERVAL_S = 0.5
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def configure_robot(robot: Robot) -> None:
     robot.set_unit(POSITION_UNIT)
@@ -101,25 +72,39 @@ def configure_robot(robot: Robot) -> None:
         right_motor_id=RIGHT_WHEEL_MOTOR,
         right_motor_dir_inverted=RIGHT_WHEEL_DIR_INVERTED,
     )
-
-    # Lidar is required for APF obstacle avoidance.
-    # After enable_lidar(), each /scan update automatically populates the
-    # obstacle list that apf_follow_path() reads on every tick.
     robot.enable_lidar()
-    print("[sensor] lidar enabled — subscribing to /scan")
-
     if ENABLE_GPS:
         robot.enable_gps()
         robot.set_tracked_tag_id(TAG_ID)
-        print(f"[sensor] GPS enabled — tracking ArUco tag {TAG_ID}")
 
 
 def start_robot(robot: Robot) -> None:
-    if robot.get_state() in (FirmwareState.ESTOP, FirmwareState.ERROR):
+    current = robot.get_state()
+    if current in (FirmwareState.ESTOP, FirmwareState.ERROR):
         robot.reset_estop()
     robot.set_state(FirmwareState.RUNNING)
+
+
+def reset_mission_pose(robot: Robot) -> None:
     robot.reset_odometry()
     robot.wait_for_pose_update(timeout=0.5)
+
+
+def show_idle_leds(robot: Robot) -> None:
+    robot.set_led(LED.ORANGE, 200)
+    robot.set_led(LED.GREEN, 0)
+
+
+def show_running_leds(robot: Robot) -> None:
+    robot.set_led(LED.ORANGE, 0)
+    robot.set_led(LED.GREEN, 200)
+
+
+def cancel_motion(robot: Robot, handle) -> None:
+    if handle is not None:
+        handle.cancel()
+        handle.wait(timeout=1.0)
+    robot.stop()
 
 
 def print_status(robot: Robot) -> None:
@@ -129,25 +114,12 @@ def print_status(robot: Robot) -> None:
     else:
         x, y, theta = robot.get_pose()
         label = "odom "
-    obs_count = len(robot.get_obstacles())
-    print(f"  {label}=({x:6.0f}, {y:6.0f}) mm  θ={theta:5.1f}°  obstacles={obs_count}")
+    obstacle_count = len(robot.get_obstacles())
+    print(f"  {label}=({x:6.0f}, {y:6.0f}) mm  θ={theta:5.1f}°  obstacles={obstacle_count}")
 
 
-# ---------------------------------------------------------------------------
-# run() — entry point called by the robot node
-# ---------------------------------------------------------------------------
-
-def run(robot: Robot) -> None:
-    configure_robot(robot)
-    start_robot(robot)
-
-    print("Starting APF navigation — place obstacles in the robot's path.")
-    print(f"  waypoints      : {WAYPOINTS_MM}")
-    print(f"  velocity       : {VELOCITY_MM_S} mm/s")
-    print(f"  repulsion range: {REPULSION_RANGE_MM} mm")
-    print(f"  repulsion gain : {REPULSION_GAIN}")
-
-    handle = robot.apf_follow_path(
+def start_path(robot: Robot):
+    return robot.apf_follow_path(
         WAYPOINTS_MM,
         velocity=VELOCITY_MM_S,
         lookahead=LOOKAHEAD_MM,
@@ -158,14 +130,72 @@ def run(robot: Robot) -> None:
         blocking=False,
     )
 
-    last_print = time.monotonic()
-    while not handle.is_finished():
-        now = time.monotonic()
-        if now - last_print >= STATUS_PRINT_INTERVAL_S:
-            print_status(robot)
-            last_print = now
-        time.sleep(0.05)
 
-    print("Path complete.")
-    print_status(robot)
-    robot.shutdown()
+def run(robot: Robot) -> None:
+    configure_robot(robot)
+
+    state = "INIT"
+    motion_handle = None
+    last_status_print_at = 0.0
+
+    period = 1.0 / float(DEFAULT_FSM_HZ)
+    next_tick = time.monotonic()
+
+    while True:
+        now = time.monotonic()
+
+        if state == "INIT":
+            start_robot(robot)
+            reset_mission_pose(robot)
+            show_idle_leds(robot)
+            print("[FSM] IDLE — press BTN_1 to start APF path, BTN_2 to cancel")
+            print(f"[CFG] waypoints={WAYPOINTS_MM}")
+            print(
+                f"[CFG] velocity={VELOCITY_MM_S:.0f} mm/s lookahead={LOOKAHEAD_MM:.0f} mm "
+                f"repulsion_range={REPULSION_RANGE_MM:.0f} mm gain={REPULSION_GAIN:.0f}"
+            )
+            state = "IDLE"
+
+        elif state == "IDLE":
+            if robot.was_button_pressed(Button.BTN_1):
+                reset_mission_pose(robot)
+                show_running_leds(robot)
+                motion_handle = start_path(robot)
+                last_status_print_at = now
+                print("[FSM] MOVING — APF path started")
+                state = "MOVING"
+
+        elif state == "MOVING":
+            if robot.was_button_pressed(Button.BTN_2):
+                cancel_motion(robot, motion_handle)
+                motion_handle = None
+                show_idle_leds(robot)
+                print("[FSM] IDLE — cancelled")
+                state = "IDLE"
+            else:
+                if now - last_status_print_at >= STATUS_PRINT_INTERVAL_S:
+                    print_status(robot)
+                    last_status_print_at = now
+                if motion_handle is not None and motion_handle.is_finished():
+                    robot.stop()
+                    motion_handle = None
+                    show_idle_leds(robot)
+                    print("[FSM] DONE — path complete")
+                    print_status(robot)
+                    state = "DONE"
+
+        elif state == "DONE":
+            if robot.was_button_pressed(Button.BTN_1):
+                reset_mission_pose(robot)
+                show_running_leds(robot)
+                motion_handle = start_path(robot)
+                last_status_print_at = now
+                print("[FSM] MOVING — APF path restarted")
+                state = "MOVING"
+
+        next_tick += period
+        sleep_s = next_tick - time.monotonic()
+        if sleep_s > 0.0:
+            time.sleep(sleep_s)
+        else:
+            next_tick = time.monotonic()
