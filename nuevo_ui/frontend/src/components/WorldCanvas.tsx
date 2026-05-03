@@ -24,12 +24,14 @@ const VENUE_EXT = {
   minY:                - VENUE_PAD_MM,
   maxY: VENUE_TOP_MM   + VENUE_PAD_MM,
 }
+const MAP_WIDTH_MM = VENUE_EXT.maxX - VENUE_EXT.minX
+const MAP_HEIGHT_MM = VENUE_EXT.maxY - VENUE_EXT.minY
 
 interface Trails { odom: boolean; gps: boolean; fused: boolean; lidar: boolean }
 
 const SERIES = [
-  { key: 'odom'  as const, label: 'Odometry', color: '#4ade80' },
-  { key: 'fused' as const, label: 'Fused',    color: '#60a5fa' },
+  { key: 'odom'  as const, label: 'Odometry', color: '#60a5fa' },
+  { key: 'fused' as const, label: 'Fused',    color: '#4ade80' },
   { key: 'gps'   as const, label: 'GPS',      color: '#facc15' },
   { key: 'lidar' as const, label: 'Lidar',    color: '#f87171' },
 ]
@@ -39,6 +41,7 @@ export function WorldCanvas() {
 
   const fusedPose   = useRobotStore((s) => s.fusedPose)
   const fusedTrail  = useRobotStore((s) => s.fusedPoseTrail)
+  const kinematics  = useRobotStore((s) => s.kinematics)
   const odomTrail   = useRobotStore((s) => s.odometryTrail)
   const gpsStatus     = useRobotStore((s) => s.gpsStatus)
   const tagDetections = useRobotStore((s) => s.tagDetections)
@@ -65,6 +68,7 @@ export function WorldCanvas() {
     const allPts: [number, number][] = []
     if (trails.fused)  allPts.push(...fusedTrail)
     if (trails.odom)   allPts.push(...odomTrail)
+    if (kinematics)    allPts.push([kinematics.x, kinematics.y])
     if (fusedPose)     allPts.push([fusedPose.x, fusedPose.y])
     if (trails.gps) for (const t of tagDetections) allPts.push([t.x, t.y])
     if (trails.lidar) {
@@ -139,10 +143,10 @@ export function WorldCanvas() {
     ctx.textBaseline = 'bottom'
     ctx.fillText(`grid: ${GRID_MM} mm`, W - 4, H - 3)
 
-    // Odometry trail (green)
+    // Odometry trail (blue)
     if (trails.odom && odomTrail.length > 1) {
       ctx.beginPath()
-      ctx.strokeStyle = 'rgba(74,222,128,0.55)'
+      ctx.strokeStyle = 'rgba(96,165,250,0.55)'
       ctx.lineWidth = 1.5
       ctx.lineJoin = 'round'
       odomTrail.forEach(([wx, wy], i) => {
@@ -151,11 +155,18 @@ export function WorldCanvas() {
       })
       ctx.stroke()
     }
+    if (trails.odom && odomTrail.length === 1) {
+      const [cx, cy] = toC(odomTrail[0][0], odomTrail[0][1])
+      ctx.beginPath()
+      ctx.arc(cx, cy, 2.5, 0, Math.PI * 2)
+      ctx.fillStyle = 'rgba(96,165,250,0.80)'
+      ctx.fill()
+    }
 
-    // Fused trail (blue)
+    // Fused trail (green)
     if (trails.fused && fusedTrail.length > 1) {
       ctx.beginPath()
-      ctx.strokeStyle = 'rgba(96,165,250,0.70)'
+      ctx.strokeStyle = 'rgba(74,222,128,0.70)'
       ctx.lineWidth = 1.5
       ctx.lineJoin = 'round'
       fusedTrail.forEach(([wx, wy], i) => {
@@ -195,31 +206,33 @@ export function WorldCanvas() {
       }
     }
 
-    // Robot at fused pose — matches OdometryCard style (blue dot + heading arrow)
-    if (fusedPose) {
-      const [rx, ry] = toC(fusedPose.x, fusedPose.y)
-      const headingCanvas = -fusedPose.theta  // world CCW → canvas CW
+    const drawRobot = (
+      x: number,
+      y: number,
+      theta: number,
+      stroke: string,
+      fill: string,
+    ) => {
+      const [rx, ry] = toC(x, y)
+      const headingCanvas = -theta  // world CCW → canvas CW
       const arrowLen = Math.max(12, Math.min(28, Math.min(rangeX, rangeY) * scale * 0.06))
       const nx = Math.cos(headingCanvas), ny = Math.sin(headingCanvas)
       const tipX = rx + nx * arrowLen, tipY = ry + ny * arrowLen
       const hw = 4
 
-      // Body
       ctx.beginPath()
       ctx.arc(rx, ry, 7, 0, Math.PI * 2)
-      ctx.fillStyle   = 'rgba(96,165,250,0.25)'
-      ctx.strokeStyle = '#60a5fa'
+      ctx.fillStyle   = fill
+      ctx.strokeStyle = stroke
       ctx.lineWidth   = 1.5
       ctx.fill()
       ctx.stroke()
 
-      // Heading arrow shaft
-      ctx.strokeStyle = '#60a5fa'
+      ctx.strokeStyle = stroke
       ctx.lineWidth   = 2
       ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(tipX, tipY); ctx.stroke()
 
-      // Arrowhead
-      ctx.fillStyle = '#60a5fa'
+      ctx.fillStyle = stroke
       ctx.beginPath()
       ctx.moveTo(tipX, tipY)
       ctx.lineTo(tipX - nx * 8 + ny * hw, tipY - ny * 8 - nx * hw)
@@ -227,7 +240,26 @@ export function WorldCanvas() {
       ctx.closePath()
       ctx.fill()
     }
-  }, [fusedPose, fusedTrail, odomTrail, gpsStatus, tagDetections, lidarPoints, trails])
+
+    // Robot at fused pose when available; otherwise fall back to raw odometry.
+    if (fusedPose) {
+      drawRobot(
+        fusedPose.x,
+        fusedPose.y,
+        fusedPose.theta,
+        '#4ade80',
+        'rgba(74,222,128,0.25)',
+      )
+    } else if (kinematics) {
+      drawRobot(
+        kinematics.x,
+        kinematics.y,
+        kinematics.theta,
+        '#60a5fa',
+        'rgba(96,165,250,0.25)',
+      )
+    }
+  }, [fusedPose, fusedTrail, kinematics, odomTrail, gpsStatus, tagDetections, lidarPoints, trails])
 
   return (
     <div className="relative rounded-2xl p-4 backdrop-blur-2xl bg-white/10 border border-white/20 shadow-xl">
@@ -255,7 +287,7 @@ export function WorldCanvas() {
         <canvas
           ref={canvasRef}
           className="w-full rounded-xl"
-          style={{ height: '420px' }}
+          style={{ aspectRatio: `${MAP_WIDTH_MM} / ${MAP_HEIGHT_MM}` }}
         />
       </div>
     </div>
