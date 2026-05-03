@@ -14,6 +14,7 @@ set(msg_files
   "msg/LidarWorldPoints.msg"
   "msg/TrackedObstacle.msg"
   "msg/TrackedObstacleArray.msg"
+  "msg/VirtualTarget.msg"
   # Vision detections
   "msg/VisionDetection.msg"
   "msg/VisionDetectionArray.msg"

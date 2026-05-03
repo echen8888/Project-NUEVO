@@ -85,6 +85,16 @@ class PurePursuitPlanner(PathPlanner):
     ) -> tuple[float, float]:
         x, y, theta = pose
         tx, ty = self._lookahead_point(x, y, waypoints)
+        return self.compute_velocity_to_point(pose, (tx, ty), max_linear)
+
+    def compute_velocity_to_point(
+        self,
+        pose: tuple[float, float, float],
+        target: tuple[float, float],
+        max_linear: float,
+    ) -> tuple[float, float]:
+        x, y, theta = pose
+        tx, ty = target
         dx = tx - x
         dy = ty - y
 
@@ -338,6 +348,200 @@ class APFPlanner:
         angular = max(-self._max_angular, min(self._max_angular, angular))
 
         return linear, angular
+
+
+class LeashedAPFPlanner:
+    """
+    Local goal-seeking planner using a leashed virtual target.
+
+    A virtual target point evolves under a point-APF field in world frame.
+    The real robot then tracks that target with a pure-pursuit-derived
+    single-point tracker. The virtual target is constrained to remain within
+    a leash cone in front of the robot.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_linear: float = 200.0,
+        max_angular: float = 1.0,
+        target_speed: float = 200.0,
+        repulsion_gain: float = 800.0,
+        repulsion_range: float = 700.0,
+        goal_tolerance: float = 20.0,
+        attraction_gain: float = 1.0,
+        force_ema_alpha: float = 0.35,
+        leash_length_mm: float = 400.0,
+        leash_half_angle_deg: float = 60.0,
+        inflation_margin_mm: float = 200.0,
+        tracker_lookahead_mm: float = 150.0,
+    ) -> None:
+        self._max_linear = float(max_linear)
+        self._max_angular = float(max_angular)
+        self._target_speed = float(target_speed)
+        self._rep_gain = float(repulsion_gain)
+        self._rep_range = float(repulsion_range)
+        self.goal_tolerance = float(goal_tolerance)
+        self._attr_gain = float(attraction_gain)
+        self._force_alpha = float(force_ema_alpha)
+        self._leash_length = float(leash_length_mm)
+        self._leash_half_angle = math.radians(float(leash_half_angle_deg))
+        self._inflation_margin = float(inflation_margin_mm)
+        self._tracker = PurePursuitPlanner(
+            lookahead_dist=float(tracker_lookahead_mm),
+            max_angular=float(max_angular),
+            goal_tolerance=float(goal_tolerance),
+        )
+
+        self._virtual_target: tuple[float, float] | None = None
+        self._force_ema: np.ndarray | None = None
+
+    def reset(self) -> None:
+        self._virtual_target = None
+        self._force_ema = None
+
+    def get_virtual_target(self) -> tuple[float, float] | None:
+        return self._virtual_target
+
+    def navigate_to_goal(
+        self,
+        pose: tuple[float, float, float],
+        goal: tuple[float, float],
+        obstacles: np.ndarray,
+        dt: float,
+    ) -> tuple[float, float]:
+        px, py, _theta = pose
+        gx, gy = goal
+        if math.hypot(gx - px, gy - py) <= self.goal_tolerance:
+            self._virtual_target = goal
+            return 0.0, 0.0
+
+        target = self.update_virtual_target(pose, goal, obstacles, dt)
+        return self._tracker.compute_velocity_to_point(pose, target, self._max_linear)
+
+    def update_virtual_target(
+        self,
+        pose: tuple[float, float, float],
+        goal: tuple[float, float],
+        obstacles: np.ndarray,
+        dt: float,
+    ) -> tuple[float, float]:
+        px, py, theta = pose
+        gx, gy = goal
+        dt = max(1e-3, float(dt))
+
+        if self._virtual_target is None:
+            self._virtual_target = (float(px), float(py))
+
+        vx, vy = self._virtual_target
+        raw_force = self._compute_force((vx, vy), goal, obstacles)
+
+        if self._force_ema is None:
+            filtered_force = raw_force
+        else:
+            filtered_force = (1.0 - self._force_alpha) * self._force_ema + self._force_alpha * raw_force
+        self._force_ema = filtered_force
+
+        force_norm = float(np.linalg.norm(filtered_force))
+        goal_dist = math.hypot(gx - vx, gy - vy)
+        if goal_dist <= self.goal_tolerance:
+            candidate = (gx, gy)
+        elif force_norm <= 1e-6:
+            candidate = (vx, vy)
+        else:
+            direction = filtered_force / force_norm
+            step_speed = min(self._target_speed, goal_dist / dt)
+            candidate = (
+                vx + float(direction[0]) * step_speed * dt,
+                vy + float(direction[1]) * step_speed * dt,
+            )
+
+        constrained = self._apply_leash(candidate, pose)
+        self._virtual_target = constrained
+        return constrained
+
+    def _compute_force(
+        self,
+        point: tuple[float, float],
+        goal: tuple[float, float],
+        obstacles: np.ndarray,
+    ) -> np.ndarray:
+        vx, vy = point
+        gx, gy = goal
+
+        goal_vec = np.array([gx - vx, gy - vy], dtype=float)
+        goal_dist = float(np.linalg.norm(goal_vec))
+        if goal_dist > 1e-6:
+            attr = self._attr_gain * (goal_vec / goal_dist)
+        else:
+            attr = np.zeros(2, dtype=float)
+
+        rep = np.zeros(2, dtype=float)
+        nearest_obs: tuple[float, float, float] | None = None
+        nearest_boundary = float("inf")
+        obs = np.asarray(obstacles, dtype=float)
+        if obs.ndim == 2 and obs.shape[0] > 0:
+            for row in obs:
+                ox = float(row[0])
+                oy = float(row[1])
+                radius = float(row[2]) if row.shape[0] >= 3 else 0.0
+                eff_radius = radius + self._inflation_margin
+                away = np.array([vx - ox, vy - oy], dtype=float)
+                center_dist = float(np.linalg.norm(away))
+                if center_dist <= 1e-6:
+                    away = np.array([0.0, 1.0], dtype=float)
+                    center_dist = 1e-6
+                boundary = center_dist - eff_radius
+                if boundary >= self._rep_range:
+                    continue
+                if boundary < nearest_boundary:
+                    nearest_boundary = boundary
+                    nearest_obs = (ox, oy, eff_radius)
+                direction = away / center_dist
+                clearance = max(boundary, 1.0)
+                rep_mag = self._rep_gain * max(0.0, (1.0 / clearance) - (1.0 / self._rep_range))
+                rep += direction * rep_mag
+
+        total = attr + rep
+
+        # APF symmetry can leave a centered obstacle with no lateral escape.
+        # Add a small deterministic tangent only when the total force is nearly
+        # singular near a blocking obstacle.
+        if nearest_obs is not None and np.linalg.norm(total) < 0.25:
+            ox, oy, _eff_radius = nearest_obs
+            away = np.array([vx - ox, vy - oy], dtype=float)
+            norm = float(np.linalg.norm(away))
+            if norm > 1e-6:
+                away /= norm
+                tangent = np.array([-away[1], away[0]], dtype=float)
+                total += 0.15 * self._attr_gain * tangent
+
+        return total
+
+    def _apply_leash(
+        self,
+        target: tuple[float, float],
+        pose: tuple[float, float, float],
+    ) -> tuple[float, float]:
+        px, py, theta = pose
+        tx, ty = target
+        dx = tx - px
+        dy = ty - py
+
+        local_x = math.cos(theta) * dx + math.sin(theta) * dy
+        local_y = -math.sin(theta) * dx + math.cos(theta) * dy
+        distance = math.hypot(local_x, local_y)
+        angle = math.atan2(local_y, local_x)
+
+        clipped_distance = min(distance, self._leash_length)
+        clipped_angle = max(-self._leash_half_angle, min(self._leash_half_angle, angle))
+
+        local_x = clipped_distance * math.cos(clipped_angle)
+        local_y = clipped_distance * math.sin(clipped_angle)
+
+        world_x = px + math.cos(theta) * local_x - math.sin(theta) * local_y
+        world_y = py + math.sin(theta) * local_x + math.cos(theta) * local_y
+        return float(world_x), float(world_y)
 
 
 class PurePursuitPlannerWithAvoidance(PathPlanner):

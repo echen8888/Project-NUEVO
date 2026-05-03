@@ -133,6 +133,7 @@ def _install_fake_robot_dependencies() -> None:
         "LidarWorldPoints",
         "TrackedObstacle",
         "TrackedObstacleArray",
+        "VirtualTarget",
         "ServoEnable",
         "ServoSet",
         "ServoStateAll",
@@ -638,6 +639,9 @@ class RobotApiTests(unittest.TestCase):
             150.0,
             1.0,
             500.0,
+            400.0,
+            100.0,
+            200.0,
         )
 
     def test_nav_follow_apf_path_uses_single_goal_planner(self) -> None:
@@ -679,6 +683,59 @@ class RobotApiTests(unittest.TestCase):
         self.assertEqual(args[1], (500.0, 0.0))
         np.testing.assert_allclose(args[2], np.array([[10.0, 120.0, 75.0]]))
         self.assertEqual(sent_commands, [(42.0, -0.5)])
+
+    def test_lapf_to_goal_starts_navigation_with_scaled_parameters(self) -> None:
+        with mock.patch.object(
+            self.robot,
+            "_start_nav",
+            side_effect=lambda target, blocking, timeout: (target(), "handle")[1],
+        ), mock.patch.object(self.robot, "_nav_lapf_to_goal") as nav_lapf:
+            result = self.robot.lapf_to_goal(
+                100.0,
+                200.0,
+                velocity=120.0,
+                tolerance=25.0,
+                leash_length=300.0,
+                repulsion_range=500.0,
+                target_speed=220.0,
+                blocking=False,
+                repulsion_gain=900.0,
+                attraction_gain=1.5,
+                force_ema_alpha=0.4,
+                inflation_margin_mm=200.0,
+                leash_half_angle_deg=60.0,
+            )
+
+        self.assertEqual(result, "handle")
+        nav_lapf.assert_called_once_with(
+            (100.0, 200.0),
+            120.0,
+            25.0,
+            300.0,
+            500.0,
+            220.0,
+            1.0,
+            900.0,
+            1.5,
+            0.4,
+            200.0,
+            60.0,
+        )
+
+    def test_publish_virtual_target_emits_active_and_clear_messages(self) -> None:
+        publisher = FakePublisher("/virtual_target")
+        self.robot._pub_virtual_target = publisher
+
+        self.robot._set_virtual_target_world_mm((320.0, 180.0))
+        self.robot._set_virtual_target_world_mm(None)
+
+        self.assertEqual(len(publisher.published), 2)
+        active_msg = publisher.published[0]
+        clear_msg = publisher.published[1]
+        self.assertTrue(active_msg.active)
+        self.assertEqual(active_msg.x, 320.0)
+        self.assertEqual(active_msg.y, 180.0)
+        self.assertFalse(clear_msg.active)
 
     def test_publish_lidar_world_projects_robot_frame_obstacles(self) -> None:
         publisher = FakePublisher("/lidar_world_points")

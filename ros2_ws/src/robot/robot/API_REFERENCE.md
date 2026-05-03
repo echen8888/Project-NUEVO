@@ -105,7 +105,7 @@ most recent message (or `None` if no message has arrived yet).
 | `/servo_state_all` | 10 Hz | `get_servo_state()` |
 | `/io_input_state` | 50 Hz | `get_button()`, `get_limit()` |
 | `/io_output_state` | 10 Hz | `get_io_output_state()` |
-| `/sensor_kinematics` | 25 Hz | `get_pose()`, `get_velocity()` |
+| `/sensor_kinematics` | 25 Hz | `get_odometry_pose()`, `get_pose()`, `get_velocity()` |
 
 ### Opt-in sensor topics — require enable_*()
 
@@ -115,7 +115,7 @@ once during setup (e.g. in `configure_robot`) before using the related API.
 | enable_*() call | Topic subscribed | Related API |
 |-----------------|-----------------|-------------|
 | `enable_lidar()` | `/scan` | `get_obstacles()`, `set_lidar_mount()`, etc. |
-| `enable_gps()` | `/tag_detections` | `is_gps_active()`, `get_fused_pose()` position |
+| `enable_gps()` | `/tag_detections` | `is_gps_active()`, `has_fused_pose()`, `get_fused_pose()` |
 | `enable_imu()` | `/sensor_imu` | `get_imu()`, `get_fused_orientation()` |
 | `enable_vision()` | `/vision/detections` | `get_detections()`, `has_detection()`, etc. |
 
@@ -285,20 +285,34 @@ robot.get_right_wheel() → int
 
 ### Pose and Velocity
 
-#### `get_pose() → tuple[float, float, float]`
-Returns `(x, y, theta_deg)` in the current unit and degrees.
+#### `get_odometry_pose() → tuple[float, float, float]`
+Returns raw wheel odometry `(x, y, theta_deg)` in the current unit and degrees.
 
-`x` and `y` are the GPS-fused position when a recent GPS fix is available
-(requires `enable_gps()`), otherwise raw wheel-odometry position.
-`theta_deg` is the sensor-fused heading (AHRS blended with odometry when
-`enable_imu()` is active and the magnetometer is calibrated).
+This is always the direct `/sensor_kinematics` pose in the local
+odometry-reset frame, without GPS position fusion.
+
+#### `get_pose() → tuple[float, float, float]`
+Returns the current navigation pose `(x, y, theta_deg)` in the current unit
+and degrees.
+
+Before GPS has been incorporated, this is raw odometry. After the first
+accepted GPS fix has been incorporated, this becomes the GPS/odometry fused
+position. `theta_deg` is always the current navigation heading.
 
 Returns `(0.0, 0.0, initial_theta_deg)` until the first kinematics message
 arrives. Call `wait_for_pose_update()` after `reset_odometry()` to ensure
 the next `get_pose()` reflects the reset.
 
-#### `get_fused_pose() → tuple[float, float, float]`
-Alias for `get_pose()`. Returns the same `(x, y, theta_deg)` tuple.
+#### `has_fused_pose() → bool`
+Returns `True` once GPS has been incorporated into the position filter.
+
+This can remain `True` while `is_gps_active()` is `False`, because the filter
+can continue dead-reckoning from the last fused anchor while GPS is
+temporarily stale.
+
+#### `get_fused_pose() → tuple[float, float, float] | None`
+Returns the fused navigation pose, or `None` if GPS has not been incorporated
+yet.
 
 #### `get_velocity() → tuple[float, float, float]`
 Returns `(vx, vy, v_theta_deg_s)`. Derived from wheel encoder differentials
@@ -401,6 +415,31 @@ Additional parameters:
 - `repulsion_range` — obstacle influence radius in current unit
 - `repulsion_gain` — repulsion force scale (default 500.0; increase to push
   harder away from obstacles)
+
+#### `lapf_to_goal(x, y, velocity, tolerance, leash_length=None, repulsion_range=None, target_speed=None, blocking=True, max_angular_rad_s=1.0, repulsion_gain=None, attraction_gain=None, force_ema_alpha=None, inflation_margin_mm=None, leash_half_angle_deg=None, timeout=None) → MotionHandle`
+Navigate to one goal using a leashed APF virtual target.
+
+The planner runs a point-APF simulation on a virtual target in world frame,
+then drives the real robot toward that moving target using a single-point
+pure-pursuit-style controller. The virtual target is clamped inside a forward
+leash cone relative to the robot.
+
+Key parameters:
+- `leash_length` — maximum robot-to-virtual-target distance in the current unit
+- `leash_half_angle_deg` — forward cone half-angle for the virtual target
+- `target_speed` — virtual-target integration speed in current unit/s
+- `repulsion_range` — APF obstacle influence radius in current unit
+- `repulsion_gain` — APF obstacle repulsion strength
+- `attraction_gain` — APF goal attraction strength
+- `force_ema_alpha` — exponential smoothing factor for the APF force vector
+- `inflation_margin_mm` — constant obstacle inflation margin applied to tracked
+  obstacle disks before the virtual target reacts to them
+
+All of these default to the Robot class LAPF constants when left as `None`.
+
+#### `get_virtual_target() → tuple[float, float] | None`
+Returns the current world-frame virtual target in the current unit, or `None`
+when no LAPF motion is active.
 
 #### `is_moving() → bool`
 Returns `True` if a navigation background thread is active.

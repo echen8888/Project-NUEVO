@@ -27,10 +27,11 @@ runtime structure.
 
 | File | Focus |
 |------|-------|
-| [`motion_basics.py`](motion_basics.py) | FSM loop, basic drive commands, servo control, single-motor velocity |
+| [`motion_basics.py`](motion_basics.py) | FSM loop with non-blocking and blocking drive commands |
 | [`pure_pursuit.py`](pure_pursuit.py) | Pure-pursuit waypoint following with optional lidar/GPS |
-| [`apf_obstacle_avoidance.py`](apf_obstacle_avoidance.py) | APF obstacle avoidance with lidar |
+| [`lapf_to_goal.py`](lapf_to_goal.py) | Leashed APF virtual-target goal seeking with lidar |
 | [`traffic_light_leds.py`](traffic_light_leds.py) | Vision detections driving simple robot behavior |
+| [`user_io.py`](user_io.py) | Button, LED, and NeoPixel interaction patterns |
 
 ---
 
@@ -39,6 +40,7 @@ runtime structure.
 | File | Notes |
 |------|-------|
 | [`obstacle_avoidance_pp.py`](obstacle_avoidance_pp.py) | Current released lane-switch obstacle-avoidance flow. Kept mainly so you can retest the released Lab 5 behavior. |
+| [`legacy/apf_obstacle_avoidance.py`](legacy/apf_obstacle_avoidance.py) | Older APF path-following example kept as a reference while LAPF becomes the active goal-seeking example. |
 
 This file is intentionally close to the released student path and still uses
 the legacy internal obstacle-avoidance helpers. Do not treat it as the clean

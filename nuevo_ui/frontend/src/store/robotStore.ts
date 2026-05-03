@@ -34,6 +34,7 @@ import type {
   SysPowerData,
   SysStateData,
   SystemStatusData,
+  VirtualTargetData,
   VoltageData,
 } from '../lib/wsProtocol'
 
@@ -257,6 +258,7 @@ function clearedRobotState(connection: ConnectionData | null, serialConnected: b
     tagDetections: [],
     lidarPoints: [],
     obstacleTracks: [],
+    virtualTarget: null,
     rosNodes: [],
   }
 }
@@ -303,6 +305,7 @@ interface RobotState {
   tagDetections: TagDetectionEntry[]  // all currently visible tags (clears when none detected)
   lidarPoints: LidarPointsData[]   // rolling window — newest last
   obstacleTracks: ObstacleTrackData[]
+  virtualTarget: VirtualTargetData | null
   rosNodes: RosNodeEntry[]
   dispatch: (topic: string, data: any, ts?: number) => void
   setMotorRecording: (motorIdx: number, active: boolean) => void
@@ -345,6 +348,7 @@ export const useRobotStore = create<RobotState>((set) => ({
   tagDetections: [],
   lidarPoints: [],
   obstacleTracks: [],
+  virtualTarget: null,
   rosNodes: [],
 
   clearErrorLog: () => set({ errorLog: [] }),
@@ -752,6 +756,10 @@ export const useRobotStore = create<RobotState>((set) => ({
 
       case 'obstacle_tracks':
         set({ obstacleTracks: data as ObstacleTrackData[] })
+        break
+
+      case 'virtual_target':
+        set({ virtualTarget: data ? (data as VirtualTargetData) : null })
         break
 
       case 'ros_nodes':

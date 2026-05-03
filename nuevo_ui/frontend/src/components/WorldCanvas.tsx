@@ -27,13 +27,14 @@ const VENUE_EXT = {
 const MAP_WIDTH_MM = VENUE_EXT.maxX - VENUE_EXT.minX
 const MAP_HEIGHT_MM = VENUE_EXT.maxY - VENUE_EXT.minY
 
-interface Trails { odom: boolean; gps: boolean; fused: boolean; lidar: boolean }
+interface Trails { odom: boolean; gps: boolean; fused: boolean; lidar: boolean; virtual: boolean }
 
 const SERIES = [
   { key: 'odom'  as const, label: 'Odometry', color: '#60a5fa' },
   { key: 'fused' as const, label: 'Fused',    color: '#4ade80' },
   { key: 'gps'   as const, label: 'GPS',      color: '#facc15' },
   { key: 'lidar' as const, label: 'Lidar',    color: '#f87171' },
+  { key: 'virtual' as const, label: 'Virtual', color: '#22d3ee' },
 ]
 
 export function WorldCanvas() {
@@ -47,8 +48,9 @@ export function WorldCanvas() {
   const tagDetections = useRobotStore((s) => s.tagDetections)
   const lidarPoints = useRobotStore((s) => s.lidarPoints)
   const obstacleTracks = useRobotStore((s) => s.obstacleTracks)
+  const virtualTarget = useRobotStore((s) => s.virtualTarget)
 
-  const [trails, setTrails] = useState<Trails>({ odom: true, gps: true, fused: true, lidar: true })
+  const [trails, setTrails] = useState<Trails>({ odom: true, gps: true, fused: true, lidar: true, virtual: true })
 
   const toggle = useCallback((key: keyof Trails) => {
     setTrails((t) => ({ ...t, [key]: !t[key] }))
@@ -72,6 +74,7 @@ export function WorldCanvas() {
     if (kinematics)    allPts.push([kinematics.x, kinematics.y])
     if (fusedPose)     allPts.push([fusedPose.x, fusedPose.y])
     if (trails.gps) for (const t of tagDetections) allPts.push([t.x, t.y])
+    if (trails.virtual && virtualTarget) allPts.push([virtualTarget.x, virtualTarget.y])
     if (trails.lidar) {
       for (const frame of lidarPoints)
         for (let i = 0; i < frame.xs.length; i++)
@@ -228,6 +231,20 @@ export function WorldCanvas() {
       }
     }
 
+    if (trails.virtual && virtualTarget) {
+      const [cx, cy] = toC(virtualTarget.x, virtualTarget.y)
+      ctx.fillStyle = 'rgba(34,211,238,0.95)'
+      ctx.strokeStyle = 'rgba(34,211,238,0.95)'
+      ctx.lineWidth = 1.5
+      ctx.beginPath()
+      ctx.arc(cx, cy, 4.0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.font = '10px monospace'
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'bottom'
+      ctx.fillText('LVT', cx + 6, cy - 2)
+    }
+
     const drawRobot = (
       x: number,
       y: number,
@@ -281,7 +298,7 @@ export function WorldCanvas() {
         'rgba(96,165,250,0.25)',
       )
     }
-  }, [fusedPose, fusedTrail, kinematics, odomTrail, gpsStatus, tagDetections, lidarPoints, obstacleTracks, trails])
+  }, [fusedPose, fusedTrail, kinematics, odomTrail, gpsStatus, tagDetections, lidarPoints, obstacleTracks, virtualTarget, trails])
 
   return (
     <div className="relative rounded-2xl p-4 backdrop-blur-2xl bg-white/10 border border-white/20 shadow-xl">

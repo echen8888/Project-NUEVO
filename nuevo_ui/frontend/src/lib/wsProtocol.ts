@@ -371,6 +371,11 @@ export interface ObstacleTrackData {
   radius: number
 }
 
+export interface VirtualTargetData {
+  x: number
+  y: number
+}
+
 export interface RosNodeEntry {
   name: string
   publishers: string[]

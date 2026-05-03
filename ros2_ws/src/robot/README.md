@@ -54,7 +54,9 @@ threads.
 Supported planners in the current tree:
 
 - `PurePursuitPlanner` — public pure-pursuit path following
-- `APFPlanner` — public obstacle-aware path following direction for future work
+- `APFPlanner` — public APF goal/obstacle field core used by the APF wrapper
+- `LeashedAPFPlanner` — public virtual-target local goal seeker with a forward
+  leash cone
 - `PurePursuitPlannerWithAvoidance` — internal lane-switch obstacle avoidance
   kept for released lab compatibility
 
@@ -80,8 +82,15 @@ The current supported flow is:
 4. Call `robot._set_obstacle_avoidance_path(path)`
 5. Call `robot._nav_follow_pp_path_loop()` on each FSM tick
 
-This is kept for released lab compatibility. For future work, `APFPlanner` is
-the cleaner direction.
+This is kept for released lab compatibility.
+
+The current active local-goal avoidance direction is the new LAPF flow:
+
+- [`robot/examples/lapf_to_goal.py`](robot/examples/lapf_to_goal.py)
+- `robot.lapf_to_goal(...)`
+
+It uses tracked lidar obstacle disks plus a leashed virtual target in front of
+the robot.
 
 ---
 

@@ -67,6 +67,7 @@ from bridge_interfaces.msg import (
     SensorImu,
     TagDetectionArray,
     TrackedObstacleArray,
+    VirtualTarget,
 )
 try:
     from bridge_interfaces.msg import VisionDetectionArray
@@ -184,6 +185,15 @@ class Robot(HardwareMixin, SensorsMixin, NavigationMixin, LegacyMixin):
     OBSTACLE_TRACK_MAX_TRACKS: int = 12
     APF_MAX_PLANNER_TRACKS: int = 6
     APF_TRACK_INPUT_MARGIN_MM: float = 150.0
+    LAPF_MAX_PLANNER_TRACKS: int = 6
+    LAPF_LEASH_LENGTH_MM: float = 400.0
+    LAPF_LEASH_HALF_ANGLE_DEG: float = 60.0
+    LAPF_TARGET_SPEED_MM_S: float = 200.0
+    LAPF_REPULSION_RANGE_MM: float = 700.0
+    LAPF_REPULSION_GAIN: float = 800.0
+    LAPF_ATTRACTION_GAIN: float = 1.0
+    LAPF_FORCE_EMA_ALPHA: float = 0.35
+    LAPF_INFLATION_MARGIN_MM: float = 200.0
 
     _SERVO_MIN_US: int = 1000
     _SERVO_MAX_US: int = 2000
@@ -284,6 +294,7 @@ class Robot(HardwareMixin, SensorsMixin, NavigationMixin, LegacyMixin):
         self._obstacles_mm: np.ndarray = np.float64([])
         self._obstacle_provider: Callable[[], list[tuple[float, float]]] | None = None
         self._obstacle_avoidance_planner = None   # legacy
+        self._virtual_target_mm: tuple[float, float] | None = None
         self._vision_detections: list[dict[str, object]] = []
         self._vision_image_size: tuple[int, int] = (0, 0)
         self._vision_last_time: float = 0.0
@@ -327,6 +338,7 @@ class Robot(HardwareMixin, SensorsMixin, NavigationMixin, LegacyMixin):
         self._odom_pub     = node.create_publisher(SysOdomReset,   '/sys_odom_reset',   10)
         self._pub_fused_pose = node.create_publisher(FusedPose,    '/fused_pose',       10)
         self._pub_obstacle_tracks = node.create_publisher(TrackedObstacleArray, '/obstacle_tracks', 10)
+        self._pub_virtual_target = node.create_publisher(VirtualTarget, '/virtual_target', 10)
 
         # ── Always-on subscriptions ───────────────────────────────────────────
         node.create_subscription(SystemState,      '/sys_state',          self._on_sys_state,      10)
