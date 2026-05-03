@@ -194,6 +194,9 @@ void DCMotor::setPins(uint8_t pinEN, uint8_t pinIN1, uint8_t pinIN2) {
     pinMode(pinIN1_, OUTPUT);
     pinMode(pinIN2_, OUTPUT);
 
+    // Keep the bridge fully de-energized during bring-up without letting
+    // Arduino's analogWrite() reconfigure the PWM timers we manage explicitly.
+    digitalWrite(pinEN_, LOW);
     digitalWrite(pinIN1_, LOW);
     digitalWrite(pinIN2_, LOW);
 
@@ -201,10 +204,6 @@ void DCMotor::setPins(uint8_t pinEN, uint8_t pinIN1, uint8_t pinIN2) {
     in2OutReg_ = portOutputRegister(digitalPinToPort(pinIN2_));
     in1Mask_ = digitalPinToBitMask(pinIN1_);
     in2Mask_ = digitalPinToBitMask(pinIN2_);
-
-    if (pinEN_ == PIN_M3_EN || pinEN_ == PIN_M4_EN) {
-        analogWrite(pinEN_, 0);
-    }
 }
 
 void DCMotor::setLimitPin(uint8_t pinLimit, uint8_t activeState) {
