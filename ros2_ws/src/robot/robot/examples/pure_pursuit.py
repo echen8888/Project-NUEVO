@@ -114,6 +114,7 @@ def configure_robot(robot: Robot) -> None:
             range_max_mm=LIDAR_RANGE_MAX_MM,
             fov_deg=LIDAR_FOV_DEG,
         )
+        robot.start_lidar_world_publisher()
         print("[sensor] lidar enabled — subscribing to /scan")
 
     if ENABLE_GPS:

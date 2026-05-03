@@ -73,6 +73,7 @@ def configure_robot(robot: Robot) -> None:
         right_motor_dir_inverted=RIGHT_WHEEL_DIR_INVERTED,
     )
     robot.enable_lidar()
+    robot.start_lidar_world_publisher()
     if ENABLE_GPS:
         robot.enable_gps()
         robot.set_tracked_tag_id(TAG_ID)
