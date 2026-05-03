@@ -81,11 +81,12 @@ MAX_ANGULAR_RAD_S = 1.0
 # distance.
 REPULSION_RANGE_MM = 300.0
 REPULSION_GAIN = 1200.0
-# Largest body extent from the rotation centre (axle) in any direction.
-# Rear-drive  → set to the distance from rear axle to the front of the robot.
-# Front-drive → set to the distance from front axle to the rear of the robot.
-# This single radius makes the planner drive-layout agnostic.
-ROBOT_RADIUS_MM = 400.0
+# Robot rectangle in robot frame (axle = rotation centre = origin).
+# Rear-drive:  front = axle→front bumper, rear = axle→rear bumper.
+# Front-drive: swap front and rear values.
+ROBOT_FRONT_MM      = 400.0   # axle to front face
+ROBOT_REAR_MM       = 100.0   # axle to rear face
+ROBOT_HALF_WIDTH_MM = 200.0   # half-width of body
 
 STATUS_PRINT_INTERVAL_S = 0.5
 
@@ -191,7 +192,9 @@ def start_path(robot: Robot):
         repulsion_range=REPULSION_RANGE_MM,
         max_angular_rad_s=MAX_ANGULAR_RAD_S,
         repulsion_gain=REPULSION_GAIN,
-        robot_radius_mm=ROBOT_RADIUS_MM,
+        robot_front_mm=ROBOT_FRONT_MM,
+        robot_rear_mm=ROBOT_REAR_MM,
+        robot_half_width_mm=ROBOT_HALF_WIDTH_MM,
         blocking=False,
     )
 
@@ -220,7 +223,10 @@ def run(robot: Robot) -> None:
                 f"repulsion_range={REPULSION_RANGE_MM:.0f} mm gain={REPULSION_GAIN:.0f} "
                 f"max_angular={MAX_ANGULAR_RAD_S:.1f} rad/s"
             )
-            print(f"[CFG] robot_radius={ROBOT_RADIUS_MM:.0f} mm")
+            print(
+                f"[CFG] robot rect: front={ROBOT_FRONT_MM:.0f} rear={ROBOT_REAR_MM:.0f} "
+                f"half_width={ROBOT_HALF_WIDTH_MM:.0f} mm"
+            )
             if ENABLE_LIDAR:
                 print(
                     f"[CFG] lidar mount=({LIDAR_MOUNT_X_MM:.0f}, {LIDAR_MOUNT_Y_MM:.0f}) mm "

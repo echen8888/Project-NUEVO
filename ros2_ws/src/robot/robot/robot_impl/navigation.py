@@ -650,7 +650,9 @@ class NavigationMixin:
         max_angular_rad_s: float = 1.0,
         repulsion_gain: float = 500.0,
         timeout: float = None,
-        robot_radius_mm: float = 200.0,
+        robot_front_mm: float = 400.0,
+        robot_rear_mm: float = 100.0,
+        robot_half_width_mm: float = 200.0,
         *,
         advance_radius: float | None = None,
     ) -> MotionHandle:
@@ -661,8 +663,10 @@ class NavigationMixin:
 
         repulsion_range is the physical air-gap clearance (mm) between the
         robot surface and the obstacle surface at which repulsion begins.
-        robot_radius_mm is the largest body extent from the odometry origin
-        (rotation centre / axle) in any direction. Works for any drive layout.
+        Robot geometry (rectangle in robot frame):
+          robot_front_mm     — axle to front face (rear-drive: nose distance)
+          robot_rear_mm      — axle to rear face  (front-drive: tail distance)
+          robot_half_width_mm — half-width of the body
         """
         if not waypoints:
             raise ValueError("waypoints must not be empty")
@@ -678,13 +682,15 @@ class NavigationMixin:
         repulsion_range_mm = float(repulsion_range) * self._unit.value
         max_angular        = float(max_angular_rad_s)
         repulsion_gain     = float(repulsion_gain)
-        robot_radius       = float(robot_radius_mm)
+        front_mm           = float(robot_front_mm)
+        rear_mm            = float(robot_rear_mm)
+        half_width_mm      = float(robot_half_width_mm)
 
         def target():
             self._nav_follow_apf_path(
                 path_mm, vel_mm, lookahead_mm, advance_radius_mm, tolerance_mm,
                 repulsion_range_mm, max_angular, repulsion_gain,
-                robot_radius,
+                front_mm, rear_mm, half_width_mm,
             )
 
         return self._start_nav(target, blocking, timeout)
@@ -893,7 +899,9 @@ class NavigationMixin:
         repulsion_range_mm: float,
         max_angular_rad_s: float,
         repulsion_gain: float,
-        robot_radius_mm: float = 200.0,
+        robot_front_mm: float = 400.0,
+        robot_rear_mm: float = 100.0,
+        robot_half_width_mm: float = 200.0,
         update_hz: float = float(DEFAULT_NAV_HZ),
     ) -> None:
         """Navigation thread body: APF path following via sequential single-goal APF.
@@ -910,13 +918,16 @@ class NavigationMixin:
             repulsion_gain=repulsion_gain,
             repulsion_range=repulsion_range_mm,
             goal_tolerance=tolerance_mm,
-            robot_radius_mm=robot_radius_mm,
+            robot_front_mm=robot_front_mm,
+            robot_rear_mm=robot_rear_mm,
+            robot_half_width_mm=robot_half_width_mm,
         )
         remaining_path = list(waypoints_mm)
         dt = 1.0 / update_hz
 
-        # Fetch obstacles within robot_radius + rep_range from the axle.
-        fetch_radius_mm = repulsion_range_mm + robot_radius_mm + float(self.APF_TRACK_INPUT_MARGIN_MM)
+        # Fetch radius: rep_range clearance off the farthest rectangle corner.
+        fetch_radius_mm = (repulsion_range_mm + robot_front_mm + robot_half_width_mm
+                           + float(self.APF_TRACK_INPUT_MARGIN_MM))
 
         while not self._nav_cancel.is_set():
             x_mm, y_mm, theta_rad = self._get_pose_mm()

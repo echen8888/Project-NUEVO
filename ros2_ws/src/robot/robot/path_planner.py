@@ -162,8 +162,9 @@ class APFPlanner:
         attraction_gain: float = 1.0,
         heading_gain: float = 2.0,
         force_ema_alpha: float = 0.35,
-        stop_dist: float = 50.0,
-        robot_radius_mm: float = 200.0,
+        robot_front_mm: float = 400.0,
+        robot_rear_mm: float = 100.0,
+        robot_half_width_mm: float = 200.0,
     ) -> None:
         self._max_linear  = max_linear
         self._max_angular = max_angular
@@ -172,9 +173,10 @@ class APFPlanner:
         self.goal_tolerance = goal_tolerance
         self._attr_gain   = attraction_gain
         self._heading_gain = heading_gain
-        self._force_alpha = float(force_ema_alpha)
-        self._stop_dist   = float(stop_dist)
-        self._robot_radius = float(robot_radius_mm)
+        self._force_alpha  = float(force_ema_alpha)
+        self._front_mm     = float(robot_front_mm)
+        self._rear_mm      = float(robot_rear_mm)
+        self._half_width   = float(robot_half_width_mm)
 
         # EMA state for desired heading — None until first call so initial
         # heading is set directly rather than blended from 0.0.
@@ -214,10 +216,13 @@ class APFPlanner:
 
         # Repulsive force — vectorised over obstacle cloud.
         #
-        # Robot is modelled as a circle of radius robot_radius_mm centred on
-        # the odometry origin (rotation centre). This is drive-layout agnostic:
-        # set robot_radius_mm to the largest body extent from the axle in any
-        # direction. Clearances are then physical air gaps between surfaces.
+        # Robot is modelled as a rectangle in its own frame:
+        #   forward  [0, front_mm], rearward [0, rear_mm], sides ±half_width.
+        # Clearance = distance from rectangle surface to obstacle surface.
+        # This is drive-layout agnostic: rear-drive sets front=nose distance,
+        # front-drive sets rear=tail distance. Only obstacles ahead of the axle
+        # (local_fwd > 0) reduce obstacle_scale so the robot is never stopped
+        # by an obstacle it is already passing beside.
         rep_x = 0.0
         rep_y = 0.0
         tan_x = 0.0
@@ -228,13 +233,30 @@ class APFPlanner:
             centers = obs[:, :2]
             radii = obs[:, 2] if obs.shape[1] >= 3 else np.zeros(obs.shape[0], dtype=float)
 
-            # Vector and distance from each obstacle center to the robot origin
-            fx_raw = px - centers[:, 0]
-            fy_raw = py - centers[:, 1]
-            center_dists = np.maximum(np.sqrt(fx_raw * fx_raw + fy_raw * fy_raw), 1e-6)
+            cos_th = math.cos(theta)
+            sin_th = math.sin(theta)
 
-            # Physical clearance between robot surface and obstacle surface
-            boundary_dists = np.maximum(center_dists - self._robot_radius - radii, 0.0)
+            # Obstacle centres in robot-local frame
+            to_obs_x = centers[:, 0] - px
+            to_obs_y = centers[:, 1] - py
+            local_fwd   = to_obs_x * cos_th + to_obs_y * sin_th
+            local_right = to_obs_x * sin_th - to_obs_y * cos_th
+
+            # Nearest point on the robot rectangle to each obstacle (local frame)
+            clamped_fwd   = np.clip(local_fwd,   -self._rear_mm,   self._front_mm)
+            clamped_right = np.clip(local_right, -self._half_width, self._half_width)
+
+            # Convert nearest rectangle point back to world frame for force direction
+            nearest_x = px + clamped_right * sin_th + clamped_fwd * cos_th
+            nearest_y = py - clamped_right * cos_th + clamped_fwd * sin_th
+
+            # Vector from each obstacle toward nearest rectangle surface point
+            fx_raw = nearest_x - centers[:, 0]
+            fy_raw = nearest_y - centers[:, 1]
+            rect_dists = np.maximum(np.sqrt(fx_raw * fx_raw + fy_raw * fy_raw), 1e-6)
+
+            # Physical clearance between rectangle surface and obstacle surface
+            boundary_dists = np.maximum(rect_dists - radii, 0.0)
             in_range = boundary_dists < self._rep_range
 
             if np.any(in_range):
@@ -242,8 +264,8 @@ class APFPlanner:
                 proximity = 1.0 - (d / self._rep_range)
                 mag = self._rep_gain * proximity * proximity
 
-                ux = fx_raw[in_range] / center_dists[in_range]
-                uy = fy_raw[in_range] / center_dists[in_range]
+                ux = fx_raw[in_range] / rect_dists[in_range]
+                uy = fy_raw[in_range] / rect_dists[in_range]
                 rep_x = float(np.sum(mag * ux))
                 rep_y = float(np.sum(mag * uy))
 
@@ -261,8 +283,13 @@ class APFPlanner:
                 tan_x = float(np.sum(tangent_mag * tangent_x))
                 tan_y = float(np.sum(tangent_mag * tangent_y))
 
-                nearest_boundary = float(np.min(boundary_dists[in_range]))
-                obstacle_scale = min(1.0, nearest_boundary / self._rep_range)
+                # Speed scaling: only obstacles ahead of the axle reduce linear
+                # velocity. Side/rear obstacles steer but don't stop the robot.
+                fwd_mask = local_fwd[in_range] > 0
+                if np.any(fwd_mask):
+                    nearest_fwd_boundary = float(np.min(boundary_dists[in_range][fwd_mask]))
+                    obstacle_scale = min(1.0, nearest_fwd_boundary / self._rep_range)
+                # else: no forward obstacle → obstacle_scale stays 1.0
 
         # Radial repulsion is intentionally excluded from the force direction.
         # The robot is already slowed by obstacle_scale; adding a backward
@@ -288,11 +315,6 @@ class APFPlanner:
         forward_scale = max(0.0, math.cos(ang_err))
         goal_scale    = min(1.0, dist_to_goal / max(2.0 * self.goal_tolerance, 1.0))
         linear  = self._max_linear * forward_scale * goal_scale * obstacle_scale
-
-        # Hard stop: within stop_dist of an obstacle surface, freeze forward motion.
-        # Angular is still allowed so the robot can steer clear before resuming.
-        if obstacle_scale < (self._stop_dist / max(self._rep_range, 1e-6)):
-            linear = 0.0
 
         angular = self._heading_gain * ang_err
         angular = max(-self._max_angular, min(self._max_angular, angular))
