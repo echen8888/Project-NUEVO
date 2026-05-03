@@ -181,6 +181,10 @@ class APFPlanner:
         # EMA state for desired heading — None until first call so initial
         # heading is set directly rather than blended from 0.0.
         self._desired_heading: float | None = None
+        # Committed tangential side for current avoidance maneuver.
+        # Set on first obstacle contact; reset when all obstacles leave range.
+        # Prevents choose_left from flipping every tick as the robot rotates.
+        self._committed_left: bool | None = None
 
     def navigate_to_goal(
         self,
@@ -229,6 +233,8 @@ class APFPlanner:
         tan_y = 0.0
         obstacle_scale = 1.0
         obs = np.asarray(obstacles)
+        if obs.ndim != 2 or obs.shape[0] == 0:
+            self._committed_left = None
         if obs.ndim == 2 and obs.shape[0] > 0:
             centers = obs[:, :2]
             radii = obs[:, 2] if obs.shape[1] >= 3 else np.zeros(obs.shape[0], dtype=float)
@@ -269,27 +275,39 @@ class APFPlanner:
                 rep_x = float(np.sum(mag * ux))
                 rep_y = float(np.sum(mag * uy))
 
-                # Tangential escape: breaks head-on local minimum.
+                # Tangential escape — commit to a side on first contact and
+                # hold it for the whole maneuver. Recomputing choose_left every
+                # tick causes it to flip as the robot rotates, producing wobble.
                 left_tx = -uy
                 left_ty =  ux
                 right_tx =  uy
                 right_ty = -ux
-                goal_ux = dx / dist_to_goal
-                goal_uy = dy / dist_to_goal
-                choose_left = (left_tx * goal_ux + left_ty * goal_uy) >= (right_tx * goal_ux + right_ty * goal_uy)
-                tangent_x = np.where(choose_left, left_tx, right_tx)
-                tangent_y = np.where(choose_left, left_ty, right_ty)
-                tangent_mag = 0.25 * self._rep_gain * proximity * proximity
-                tan_x = float(np.sum(tangent_mag * tangent_x))
-                tan_y = float(np.sum(tangent_mag * tangent_y))
+                if self._committed_left is None:
+                    goal_ux = dx / dist_to_goal
+                    goal_uy = dy / dist_to_goal
+                    left_score  = float(np.sum(left_tx  * goal_ux + left_ty  * goal_uy))
+                    right_score = float(np.sum(right_tx * goal_ux + right_ty * goal_uy))
+                    self._committed_left = left_score >= right_score
 
-                # Speed scaling: only obstacles ahead of the axle reduce linear
-                # velocity. Side/rear obstacles steer but don't stop the robot.
+                tangent_mag = 0.25 * self._rep_gain * proximity * proximity
+                if self._committed_left:
+                    tan_x = float(np.sum(tangent_mag * left_tx))
+                    tan_y = float(np.sum(tangent_mag * left_ty))
+                else:
+                    tan_x = float(np.sum(tangent_mag * right_tx))
+                    tan_y = float(np.sum(tangent_mag * right_ty))
+
+                # Speed scaling: only forward obstacles (ahead of axle) reduce
+                # linear velocity. Side/rear obstacles steer but don't stop.
+                # Floor of 0.15 prevents a full stop when touching the front
+                # face — the robot keeps creeping while rotating clear.
                 fwd_mask = local_fwd[in_range] > 0
                 if np.any(fwd_mask):
                     nearest_fwd_boundary = float(np.min(boundary_dists[in_range][fwd_mask]))
-                    obstacle_scale = min(1.0, nearest_fwd_boundary / self._rep_range)
+                    obstacle_scale = max(0.15, min(1.0, nearest_fwd_boundary / self._rep_range))
                 # else: no forward obstacle → obstacle_scale stays 1.0
+            else:
+                self._committed_left = None  # obstacle cleared — fresh choice next time
 
         # Radial repulsion is intentionally excluded from the force direction.
         # The robot is already slowed by obstacle_scale; adding a backward
