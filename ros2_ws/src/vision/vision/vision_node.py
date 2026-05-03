@@ -16,6 +16,10 @@ from vision.model_utils import (
     default_model_path,
     resolve_model_path,
 )
+from vision.rule_based_detection import (
+    detect_yellow_block,
+)
+from vision.stop_sign import classify_stop_sign_visibility
 from vision.timing_utils import FixedRateScheduler
 from vision.traffic_light import classify_traffic_light_color
 
@@ -31,6 +35,26 @@ CLASSES_OF_INTEREST = [
 ]
 
 DEFAULT_CLASS_FILTER = ",".join(CLASSES_OF_INTEREST)
+
+
+def classify_person_face_lighting(person_crop) -> tuple[str, float]:
+    if person_crop.size == 0:
+        return "unknown", 0.0
+
+    crop_height, crop_width = person_crop.shape[:2]
+    face_height = max(1, crop_height // 3)
+    face_left = crop_width // 4
+    face_right = max(face_left + 1, crop_width - face_left)
+    face_crop = person_crop[:face_height, face_left:face_right]
+    if face_crop.size == 0:
+        return "unknown", 0.0
+
+    brightness = float(face_crop.mean()) / 255.0
+    if brightness < 0.25:
+        return "dim", min(1.0, (0.25 - brightness) / 0.25)
+    if brightness > 0.75:
+        return "bright", min(1.0, (brightness - 0.75) / 0.25)
+    return "normal", max(0.0, 1.0 - (abs(brightness - 0.5) / 0.25))
 
 
 class VisionNode(Node):
@@ -53,6 +77,7 @@ class VisionNode(Node):
         self.declare_parameter("max_detections", 20)
         self.declare_parameter("class_filter", DEFAULT_CLASS_FILTER)
         self.declare_parameter("ncnn_threads", 4)
+        self.declare_parameter("enable_rule_based_detection", False)
         self.declare_parameter("reconnect_delay_sec", 1.0)
         self.declare_parameter("log_interval_sec", 5.0)
         self.declare_parameter("debug_save_enabled", False)
@@ -74,6 +99,9 @@ class VisionNode(Node):
         self._max_detections = int(self.get_parameter("max_detections").value)
         self._class_filter = str(self.get_parameter("class_filter").value)
         self._ncnn_threads = int(self.get_parameter("ncnn_threads").value)
+        self._enable_rule_based_detection = bool(
+            self.get_parameter("enable_rule_based_detection").value
+        )
         self._reconnect_delay_sec = max(0.1, float(self.get_parameter("reconnect_delay_sec").value))
         self._log_interval_sec = max(1.0, float(self.get_parameter("log_interval_sec").value))
 
@@ -113,9 +141,8 @@ class VisionNode(Node):
             class_filter=self._class_filter,
             ncnn_threads=self._ncnn_threads,
         )
-
         self.get_logger().info(
-            "Loaded NCNN YOLO model path=%s max_imgsz=%d classes=%d filter=%s ncnn_threads=%s confidence=%.2f"
+            "Loaded NCNN YOLO model path=%s max_imgsz=%d classes=%d filter=%s ncnn_threads=%s confidence=%.2f yellow_block=%s"
             % (
                 model_path,
                 self._model_imgsz,
@@ -123,11 +150,15 @@ class VisionNode(Node):
                 self._class_filter or "all",
                 self._ncnn_threads if self._ncnn_threads > 0 else "auto",
                 self._confidence_threshold,
+                "on" if self._enable_rule_based_detection else "off",
             )
         )
 
-    def _infer(self, frame) -> list[DetectedObject]:
+    def _infer_yolo_detections(self, frame) -> list[DetectedObject]:
         return self._detector.predict(frame)
+
+    def _detect_yellow_block(self, frame):
+        return detect_yellow_block(frame, enabled=self._enable_rule_based_detection)
 
     def _build_detection_msg(self, detected_object: DetectedObject) -> VisionDetection:
         detection = VisionDetection()
@@ -179,10 +210,10 @@ class VisionNode(Node):
             capture_stamp = self.get_clock().now().to_msg()
             inference_start = time.monotonic()
             try:
-                detections = self._infer(frame)
-                # and/or some custom cnn/non-cnn object detection method
+                yolo_detections = self._infer_yolo_detections(frame)
+                yellow_block_detections, yellow_block_overlays = self._detect_yellow_block(frame)
                 
-                for detection in detections:
+                for detection in yolo_detections:
                     object_crop = frame[
                         detection.y : detection.y + detection.height,
                         detection.x : detection.x + detection.width,
@@ -194,31 +225,38 @@ class VisionNode(Node):
                         
                         # Add attribute to the detection result; we add color here as an example
                         detection.add_attribute("color", color_label, color_score)
+
+                    elif detection.class_name == "stop sign":
+                        stop_sign_crop = object_crop
+                        visibility_label, visibility_score = classify_stop_sign_visibility(stop_sign_crop)
+                        detection.add_attribute("visibility", visibility_label, visibility_score)
                         
-                    elif detection.class_name == "face":
-                        face_crop = object_crop
-                        # TODO: analyze the face crop and attach your own
-                        # attributes here, for example gender or customer type.
-                        _ = face_crop
-                        pass
-                    
-                    elif detection.class_name == "my_object":
-                        custom_object_crop = object_crop
-                        # TODO: add custom object-specific checks here.
-                        _ = custom_object_crop
-                        pass
+                    elif detection.class_name == "person":
+                        person_crop = object_crop
+                        face_lighting_label, face_lighting_score = classify_person_face_lighting(person_crop)
+                        detection.add_attribute("face_lighting", face_lighting_label, face_lighting_score)
+                
+                all_detections = yolo_detections + yellow_block_detections
 
                 message = self._build_detection_array_msg(
                     capture_stamp=capture_stamp,
                     image_width=frame.shape[1],
                     image_height=frame.shape[0],
-                    detected_objects=detections,
+                    detected_objects=all_detections,
                 )
                 self._publisher.publish(message)
-                self._debug_writer.maybe_write(frame_bgr=frame, detected_objects=detections)
+                self._debug_writer.maybe_write(
+                    frame_bgr=frame,
+                    detected_objects=all_detections,
+                    debug_overlays=yellow_block_overlays,
+                )
+                yolo_count = len(yolo_detections)
+                yellow_block_count = len(yellow_block_detections)
                 detection_count = len(message.detections)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 self.get_logger().error(f"Vision inference failed for one frame: {exc}")
+                yolo_count = 0
+                yellow_block_count = 0
                 detection_count = 0
             inference_ms = (time.monotonic() - inference_start) * 1000.0
 
@@ -226,7 +264,7 @@ class VisionNode(Node):
             if now - self._last_loop_summary >= self._log_interval_sec:
                 self._last_loop_summary = now
                 self.get_logger().info(
-                    "Vision frame %dx%d total=%.1fms preprocess=%.1fms ncnn=%.1fms postprocess=%.1fms detections=%d target_rate=%.1fHz"
+                    "Vision frame %dx%d total=%.1fms preprocess=%.1fms ncnn=%.1fms postprocess=%.1fms yolo=%d yellow_block=%d total=%d target_rate=%.1fHz"
                     % (
                         frame.shape[1],
                         frame.shape[0],
@@ -234,6 +272,8 @@ class VisionNode(Node):
                         self._detector.last_preprocess_ms,
                         self._detector.last_inference_ms,
                         self._detector.last_postprocess_ms,
+                        yolo_count,
+                        yellow_block_count,
                         detection_count,
                         self._process_rate_hz,
                     )

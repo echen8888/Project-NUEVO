@@ -24,7 +24,7 @@ def classify_traffic_light_color(traffic_light_crop: np.ndarray) -> tuple[str, f
     blurred = cv2.GaussianBlur(traffic_light_crop, (5, 5), 0)
     hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
 
-    # TODO(student): tune these HSV ranges for your lighting and traffic-light model.
+    # TODO: tune these HSV ranges for your lighting and traffic-light model.
     red_mask_1 = cv2.inRange(hsv, (0, 80, 80), (12, 255, 255))
     red_mask_2 = cv2.inRange(hsv, (168, 80, 80), (180, 255, 255))
     red_mask = cv2.bitwise_or(red_mask_1, red_mask_2)

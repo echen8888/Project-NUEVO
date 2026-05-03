@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import time
@@ -7,6 +8,15 @@ import time
 import cv2
 
 from vision.model_utils import DetectedObject
+
+
+@dataclass
+class DebugOverlay:
+    color: tuple[int, int, int]
+    contour: object | None = None
+    label: str | None = None
+    x: int = 0
+    y: int = 0
 
 
 class DetectionDebugWriter:
@@ -44,6 +54,7 @@ class DetectionDebugWriter:
         self,
         frame_bgr,
         detected_objects: list[DetectedObject],
+        debug_overlays: list[DebugOverlay] | None = None,
     ) -> None:
         if not self.enabled:
             return
@@ -57,7 +68,7 @@ class DetectionDebugWriter:
 
         try:
             self.output_dir.mkdir(parents=True, exist_ok=True)
-            annotated = annotate_detections(frame_bgr, detected_objects)
+            annotated = annotate_detections(frame_bgr, detected_objects, debug_overlays=debug_overlays)
 
             if self.save_latest:
                 latest_path = self.output_dir / "latest.jpg"
@@ -95,6 +106,7 @@ class DetectionDebugWriter:
 def annotate_detections(
     frame_bgr,
     detected_objects: list[DetectedObject],
+    debug_overlays: list[DebugOverlay] | None = None,
 ):
     annotated = frame_bgr.copy()
     for detected_object in detected_objects:
@@ -108,6 +120,12 @@ def annotate_detections(
 
         label = _build_label(detected_object)
         _draw_label(annotated, label, x1, y1, color)
+
+    for overlay in debug_overlays or ():
+        if overlay.contour is not None:
+            cv2.drawContours(annotated, [overlay.contour], -1, overlay.color, 2)
+        if overlay.label:
+            _draw_label(annotated, overlay.label, int(overlay.x), int(overlay.y), overlay.color)
 
     return annotated
 
