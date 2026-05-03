@@ -1,5 +1,8 @@
 # Vision Model Data
 
+For package-level runtime usage, debugging, and launch integration, see:
+- [`../README.md`](../README.md)
+
 The default ROS vision node model is an exported Ultralytics YOLO26n NCNN
 model:
 
