@@ -97,7 +97,7 @@ def run(robot: Robot) -> None:
                 alpha_Ld=0.7,
                 offset=270.0,
                 lane_width=500.0,
-                obstacle_avoidance=True,
+                obstacle_avoidance=False,
                 x_L=300.0,
             )
             robot.planner.set_path(path)
